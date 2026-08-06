@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-cell: var(--cell);
+  --color-cell-hover: var(--cell-hover);
+  --color-done: var(--done);
+  --color-done-hover: var(--done-hover);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-tooltip: var(--tooltip);
+
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Helvetica Neue",
+    Helvetica, Arial, sans-serif;
+}
+
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f6f8fa;
+  --ink: #1f2328;
+  --ink-muted: #5b636c;
+  --ink-faint: #8b939c;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.2);
+  --cell: #ebedf0;
+  --cell-hover: #d0d7de;
+  --cell-ring: rgba(27, 31, 35, 0.06);
+  --done: #2da44e;
+  --done-hover: #218739;
+  --accent: #0969da;
+  --danger: #cf222e;
+  --tooltip: #24292f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1c1c1e;
+    --surface-raised: rgba(255, 255, 255, 0.07);
+    --ink: #ebedf0;
+    --ink-muted: #a1a8b0;
+    --ink-faint: #767e87;
+    --line: rgba(255, 255, 255, 0.1);
+    --line-strong: rgba(255, 255, 255, 0.24);
+    --cell: #2d333b;
+    --cell-hover: #444c56;
+    --cell-ring: rgba(255, 255, 255, 0.06);
+    --done: #2ea043;
+    --done-hover: #3fb950;
+    --accent: #58a6ff;
+    --danger: #f85149;
+    --tooltip: #3b3b40;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--surface);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+/* Invisible scrollbar — wheel is mapped to horizontal scroll in HabitGrid;
+   the left fade hints that older days are off-screen. */
+.grid-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+}
+
+.grid-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

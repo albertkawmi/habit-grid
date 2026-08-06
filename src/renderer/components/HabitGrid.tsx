@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, X } from 'lucide-react'
+import { Check, GripVertical, X } from 'lucide-react'
 import {
   addDays,
   dateRange,
@@ -117,6 +117,7 @@ function SortableHabitName({
   onDelete,
   onHover
 }: SortableHabitNameProps): React.JSX.Element {
+  const [confirming, setConfirming] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: habit.id
   })
@@ -134,6 +135,7 @@ function SortableHabitName({
         transition
       }}
       onMouseEnter={onHover}
+      onMouseLeave={() => setConfirming(false)}
     >
       <button
         type="button"
@@ -159,11 +161,12 @@ function SortableHabitName({
       */}
       <span
         className={cn(
-          'pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 whitespace-nowrap',
+          'pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap',
           'left-1 overflow-x-clip text-[11px] leading-[14px]',
+          confirming ? 'right-12' : 'right-5',
           'group-hover/name:left-3',
           '[mask-image:linear-gradient(to_right,#000_82%,transparent)]',
-          'transition-[color,left] duration-100',
+          'transition-[color,left,right] duration-100',
           highlighted ? 'text-ink' : 'text-ink-muted',
           isDragging && 'left-3'
         )}
@@ -171,19 +174,48 @@ function SortableHabitName({
       >
         {habit.name}
       </span>
-      <button
-        type="button"
-        aria-label={`Delete ${habit.name}`}
-        onClick={onDelete}
-        className={cn(
-          'relative z-10 ml-auto grid h-3.5 w-3.5 shrink-0 place-items-center rounded opacity-0',
-          'text-ink-faint transition-opacity duration-100',
-          'group-hover/name:opacity-100 hover:bg-danger/15 hover:text-danger',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-danger/60'
-        )}
-      >
-        <X className="h-2.5 w-2.5" strokeWidth={2.5} />
-      </button>
+      {confirming ? (
+        <div className="relative z-10 ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label={`Confirm delete ${habit.name}`}
+            onClick={onDelete}
+            className={cn(
+              'grid h-3.5 w-3.5 place-items-center rounded',
+              'text-danger hover:bg-danger/15',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-danger/60'
+            )}
+          >
+            <Check className="h-2.5 w-2.5" strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            aria-label="Cancel delete"
+            onClick={() => setConfirming(false)}
+            className={cn(
+              'grid h-3.5 w-3.5 place-items-center rounded',
+              'text-ink-faint hover:bg-cell hover:text-ink-muted',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/50'
+            )}
+          >
+            <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label={`Delete ${habit.name}`}
+          onClick={() => setConfirming(true)}
+          className={cn(
+            'relative z-10 ml-auto grid h-3.5 w-3.5 shrink-0 place-items-center rounded opacity-0',
+            'text-ink-faint transition-opacity duration-100',
+            'group-hover/name:opacity-100 hover:bg-danger/15 hover:text-danger',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-danger/60'
+          )}
+        >
+          <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+        </button>
+      )}
     </div>
   )
 }

@@ -13,6 +13,7 @@
   --color-done: var(--done);
   --color-done-hover: var(--done-hover);
   --color-accent: var(--accent);
+  --color-chart-4: var(--chart-4);
   --color-danger: var(--danger);
   --color-tooltip: var(--tooltip);
 
@@ -34,6 +35,8 @@
   --done: #2da44e;
   --done-hover: #218739;
   --accent: #0969da;
+  /* shadcn chart-4 — amber/gold */
+  --chart-4: oklch(0.828 0.189 84.429);
   --danger: #cf222e;
   --tooltip: #24292f;
 }
@@ -53,6 +56,8 @@
     --done: #2ea043;
     --done-hover: #3fb950;
     --accent: #58a6ff;
+    /* Keep chart-4 gold in dark for semantic highlights (shadcn default reassigns it). */
+    --chart-4: oklch(0.828 0.189 84.429);
     --danger: #f85149;
     --tooltip: #3b3b40;
   }
@@ -93,4 +98,9 @@ body {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Today’s cells: soft gold ring via shadcn chart-4. */
+.today-ring {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--chart-4) 65%, transparent);
 }

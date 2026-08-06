@@ -11,9 +11,59 @@ const TRAY_GAP = 6
 
 let tray: Tray | null = null
 let popup: BrowserWindow | null = null
+let hideOnBlurTimer: ReturnType<typeof setTimeout> | null = null
+/** Ignore blur-hide until this time — accessory/tray focus is flaky right after show. */
+let ignoreBlurUntil = 0
 
 function surfaceColor(): string {
   return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#ffffff'
+}
+
+function clearHideOnBlurTimer(): void {
+  if (hideOnBlurTimer !== null) {
+    clearTimeout(hideOnBlurTimer)
+    hideOnBlurTimer = null
+  }
+}
+
+function pointInBounds(
+  point: Electron.Point,
+  bounds: Electron.Rectangle,
+  padding = 0
+): boolean {
+  return (
+    point.x >= bounds.x - padding &&
+    point.x <= bounds.x + bounds.width + padding &&
+    point.y >= bounds.y - padding &&
+    point.y <= bounds.y + bounds.height + padding
+  )
+}
+
+/** True when the cursor is over the popup or tray (not a “click outside”). */
+function cursorOverPopupOrTray(): boolean {
+  if (!popup || popup.isDestroyed()) return false
+  const point = screen.getCursorScreenPoint()
+  if (pointInBounds(point, popup.getBounds(), 2)) return true
+  if (tray) {
+    // Include the gap between tray and popup so moving between them doesn't dismiss.
+    if (pointInBounds(point, tray.getBounds(), TRAY_GAP)) return true
+  }
+  return false
+}
+
+function scheduleHideOnOutsideBlur(): void {
+  clearHideOnBlurTimer()
+  // Deferred so tray re-clicks / brief focus churn don't flash-hide.
+  hideOnBlurTimer = setTimeout(() => {
+    hideOnBlurTimer = null
+    if (!popup || popup.isDestroyed() || !popup.isVisible()) return
+    if (Date.now() < ignoreBlurUntil) return
+    // Stay open unless the cursor is clearly outside popup + tray.
+    // Blur alone is not enough under activationPolicy: 'accessory' — macOS often
+    // steals key window without a user click outside.
+    if (cursorOverPopupOrTray()) return
+    hidePopup()
+  }, 200)
 }
 
 export function getPopup(): BrowserWindow | null {
@@ -37,6 +87,8 @@ export function createPopup(preloadPath: string): BrowserWindow {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    // Panel-style windows keep tray popups more stable under accessory activation.
+    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -53,12 +105,11 @@ export function createPopup(preloadPath: string): BrowserWindow {
   })
 
   popup.on('blur', () => {
-    // Deferred so a tray re-click or in-window focus shift doesn't flash-hide.
-    setTimeout(() => {
-      if (popup && !popup.isDestroyed() && !popup.isFocused()) {
-        hidePopup()
-      }
-    }, 150)
+    scheduleHideOnOutsideBlur()
+  })
+
+  popup.on('focus', () => {
+    clearHideOnBlurTimer()
   })
 
   popup.webContents.on('before-input-event', (_event, input) => {
@@ -68,6 +119,7 @@ export function createPopup(preloadPath: string): BrowserWindow {
   })
 
   popup.on('closed', () => {
+    clearHideOnBlurTimer()
     popup = null
   })
 
@@ -85,6 +137,10 @@ export function resizePopup(height: number, width?: number): void {
   const bounds = popup.getBounds()
   if (bounds.height === nextHeight && bounds.width === nextWidth) return
 
+  // Geometry changes can jostle focus on accessory windows — don't treat as dismiss.
+  if (popup.isVisible()) {
+    ignoreBlurUntil = Math.max(ignoreBlurUntil, Date.now() + 250)
+  }
   popup.setSize(nextWidth, nextHeight, false)
   if (popup.isVisible()) {
     positionNearTray()
@@ -111,12 +167,17 @@ function positionNearTray(): void {
 
 export function showPopup(): void {
   if (!popup) return
+  clearHideOnBlurTimer()
+  // Focus often fails to stick under activationPolicy: 'accessory'; suppress
+  // blur-hide briefly so show-then-vanish races don't dismiss the popup.
+  ignoreBlurUntil = Date.now() + 400
   positionNearTray()
   popup.show()
   popup.focus()
 }
 
 export function hidePopup(): void {
+  clearHideOnBlurTimer()
   if (popup && !popup.isDestroyed() && popup.isVisible()) {
     popup.hide()
   }

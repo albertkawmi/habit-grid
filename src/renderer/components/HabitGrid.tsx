@@ -413,7 +413,7 @@ export function HabitGrid({
                             : isDone
                               ? 'bg-done hover:bg-done-hover hover:scale-[1.18]'
                               : 'bg-cell hover:bg-cell-hover hover:scale-[1.18]',
-                          date === today && 'ring-2 ring-accent'
+                          date === today && 'today-ring'
                         )}
                         style={{
                           width: CELL,

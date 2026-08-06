@@ -285,12 +285,15 @@ export function HabitGrid({
   const [weeksBack, setWeeksBack] = useState(INITIAL_WEEKS)
   const [completions, setCompletions] = useState<CompletionsMap>({})
   const [hover, setHover] = useState<HoverTarget | null>(null)
+  /** Clamped tooltip coords so the tip stays inside the popup window. */
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null)
   /** True when older days sit off-screen to the left of the viewport. */
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(0)
   const [activeId, setActiveId] = useState<number | null>(null)
 
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
   // Distance from the right edge, preserved while prepending older columns.
   const rightAnchor = useRef<number | null>(null)
 
@@ -405,6 +408,7 @@ export function HabitGrid({
 
   const clearHover = useCallback((): void => {
     setHover(null)
+    setTipPos(null)
   }, [])
 
   const handleCellHover = useCallback(
@@ -431,6 +435,7 @@ export function HabitGrid({
 
     setCanScrollLeft(el.scrollLeft > 2)
     setHover(null)
+    setTipPos(null)
 
     if (el.scrollLeft < COL * 7 && rightAnchor.current === null) {
       rightAnchor.current = el.scrollWidth - el.scrollLeft
@@ -476,6 +481,36 @@ export function HabitGrid({
   const hoveredFullLabel = hover
     ? (dateMeta.find((meta) => meta.date === hover.date)?.fullLabel ?? formatFullDate(hover.date))
     : ''
+
+  // Prefer right-of-cell, vertically centered; shift/flip when the popup edge would clip.
+  useLayoutEffect(() => {
+    if (!hover) {
+      setTipPos(null)
+      return
+    }
+    const el = tooltipRef.current
+    if (!el) return
+
+    const margin = 6
+    const { offsetHeight: h, offsetWidth: w } = el
+    const viewW = window.innerWidth
+    const viewH = window.innerHeight
+
+    let top = hover.top - h / 2
+    let left = hover.left
+
+    if (top + h > viewH - margin) top = viewH - margin - h
+    if (top < margin) top = margin
+
+    if (left + w > viewW - margin) {
+      // Flip to the left of the cell (hover.left is cell.right + 6).
+      const flipped = hover.left - 6 - CELL - 6 - w
+      left = flipped >= margin ? flipped : viewW - margin - w
+    }
+    if (left < margin) left = margin
+
+    setTipPos({ left, top })
+  }, [hover, hoveredDone, hoveredFullLabel])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-visible" onMouseLeave={clearHover}>
@@ -539,15 +574,16 @@ export function HabitGrid({
       {/* Lightweight tooltip — positioned from the hovered cell, no Radix open-state loop. */}
       {hover ? (
         <div
+          ref={tooltipRef}
           role="tooltip"
           className={cn(
             'pointer-events-none fixed z-50 max-w-56 rounded-lg bg-tooltip px-2 py-1.5',
-            'text-[11px] leading-snug text-white shadow-lg shadow-black/25 ring-1 ring-white/10'
+            'text-[11px] leading-snug text-white shadow-lg shadow-black/25 ring-1 ring-white/10',
+            !tipPos && 'invisible'
           )}
           style={{
-            left: hover.left,
-            top: hover.top,
-            transform: 'translateY(-50%)'
+            left: tipPos?.left ?? hover.left,
+            top: tipPos?.top ?? hover.top
           }}
         >
           <div className="font-semibold">{hover.habit.name}</div>

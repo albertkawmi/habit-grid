@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   DndContext,
   type DragEndEvent,
@@ -17,7 +17,6 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { GripVertical, X } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   addDays,
   dateRange,
@@ -78,6 +77,15 @@ interface HoverTarget {
   top: number
 }
 
+interface DateMeta {
+  date: string
+  index: number
+  fullLabel: string
+  weekLabel: string | null
+  future: boolean
+  isToday: boolean
+}
+
 interface HabitGridProps {
   habits: Habit[]
   /** Bumped by the shell to force a reload and re-align the 3-week view. */
@@ -91,6 +99,16 @@ interface SortableHabitNameProps {
   highlighted: boolean
   onDelete: () => void
   onHover: () => void
+}
+
+interface CalendarMatrixProps {
+  dateMeta: DateMeta[]
+  habits: Habit[]
+  completedByHabit: Map<number, Set<string>>
+  gridWidth: number
+  activeId: number | null
+  onToggle: (habitId: number, date: string) => void
+  onCellHover: (habit: Habit, date: string, left: number, top: number) => void
 }
 
 function SortableHabitName({
@@ -170,6 +188,93 @@ function SortableHabitName({
   )
 }
 
+/**
+ * Memoized so hover / tooltip updates in HabitGrid do not reconcile every cell.
+ * Re-renders only when dates, habits, completions, or drag opacity change.
+ */
+const CalendarMatrix = memo(function CalendarMatrix({
+  dateMeta,
+  habits,
+  completedByHabit,
+  gridWidth,
+  activeId,
+  onToggle,
+  onCellHover
+}: CalendarMatrixProps): React.JSX.Element {
+  return (
+    <div className="flex flex-col" style={{ width: gridWidth, gap: GAP }}>
+      {/* Week axis: only Mondays are labelled. */}
+      <div className="relative" style={{ height: AXIS_H, width: gridWidth }}>
+        {dateMeta.map((meta) =>
+          meta.weekLabel ? (
+            <span
+              key={meta.date}
+              className="absolute top-0 whitespace-nowrap text-[9.5px] font-medium leading-none tracking-wide text-ink-faint"
+              style={{ left: meta.index * COL }}
+            >
+              {meta.weekLabel}
+            </span>
+          ) : null
+        )}
+      </div>
+
+      {habits.map((habit) => {
+        const done = completedByHabit.get(habit.id)
+        return (
+          <div
+            key={habit.id}
+            className={cn(
+              'flex transition-opacity duration-100',
+              activeId === habit.id && 'opacity-40'
+            )}
+            style={{ height: CELL, gap: GAP }}
+          >
+            {dateMeta.map((meta) => {
+              const isDone = done?.has(meta.date) ?? false
+              return (
+                <button
+                  key={meta.date}
+                  type="button"
+                  tabIndex={-1}
+                  disabled={meta.future}
+                  aria-label={`${habit.name} — ${meta.fullLabel}`}
+                  aria-pressed={isDone}
+                  onClick={() => onToggle(habit.id, meta.date)}
+                  onMouseEnter={(event) => {
+                    // Prefer layout edge over assuming CELL size — hover:scale affects the rect.
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    onCellHover(
+                      habit,
+                      meta.date,
+                      rect.right + 6,
+                      rect.top + rect.height / 2
+                    )
+                  }}
+                  className={cn(
+                    'shrink-0 rounded-[3px] transition-[background-color,transform] duration-75',
+                    meta.future
+                      ? 'cursor-default bg-cell/40'
+                      : isDone
+                        ? 'bg-done hover:bg-done-hover hover:scale-[1.18]'
+                        : 'bg-cell hover:bg-cell-hover hover:scale-[1.18]',
+                    meta.isToday && 'today-ring'
+                  )}
+                  style={{
+                    width: CELL,
+                    height: CELL,
+                    outline: '1px solid var(--cell-ring)',
+                    outlineOffset: -1
+                  }}
+                />
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
 export function HabitGrid({
   habits,
   refreshKey,
@@ -207,6 +312,20 @@ export function HabitGrid({
   const homeScroll = useMemo(
     () => Math.max(0, daysBetween(start, visibleStart(today)) * COL),
     [start, today]
+  )
+
+  // Locale formatting once per date-range change — not on every hover/render.
+  const dateMeta = useMemo<DateMeta[]>(
+    () =>
+      dates.map((date, index) => ({
+        date,
+        index,
+        fullLabel: formatFullDate(date),
+        weekLabel: isMonday(date) ? formatWeekLabel(date) : null,
+        future: date > today,
+        isToday: date === today
+      })),
+    [dates, today]
   )
 
   const completedByHabit = useMemo(() => {
@@ -284,6 +403,28 @@ export function HabitGrid({
     rightAnchor.current = null
   }, [dates])
 
+  const clearHover = useCallback((): void => {
+    setHover(null)
+  }, [])
+
+  const handleCellHover = useCallback(
+    (habit: Habit, date: string, left: number, top: number): void => {
+      setHover((prev) => {
+        if (
+          prev &&
+          prev.habit.id === habit.id &&
+          prev.date === date &&
+          prev.left === left &&
+          prev.top === top
+        ) {
+          return prev
+        }
+        return { habit, date, left, top }
+      })
+    },
+    []
+  )
+
   const handleScroll = (): void => {
     const el = scrollerRef.current
     if (!el) return
@@ -297,16 +438,26 @@ export function HabitGrid({
     }
   }
 
-  const toggle = async (habitId: number, date: string): Promise<void> => {
-    if (date > today) return
-    const done = await window.api.toggleCompletion(habitId, date)
-    setCompletions((prev) => {
-      const updated = new Set(prev[habitId] ?? [])
-      if (done) updated.add(date)
-      else updated.delete(date)
-      return { ...prev, [habitId]: Array.from(updated) }
-    })
-  }
+  const toggle = useCallback(
+    async (habitId: number, date: string): Promise<void> => {
+      if (date > today) return
+      const done = await window.api.toggleCompletion(habitId, date)
+      setCompletions((prev) => {
+        const updated = new Set(prev[habitId] ?? [])
+        if (done) updated.add(date)
+        else updated.delete(date)
+        return { ...prev, [habitId]: Array.from(updated) }
+      })
+    },
+    [today]
+  )
+
+  const handleToggle = useCallback(
+    (habitId: number, date: string): void => {
+      void toggle(habitId, date)
+    },
+    [toggle]
+  )
 
   const handleDragEnd = (event: DragEndEvent): void => {
     setActiveId(null)
@@ -322,12 +473,12 @@ export function HabitGrid({
 
   const hoveredDone =
     hover !== null && (completedByHabit.get(hover.habit.id)?.has(hover.date) ?? false)
+  const hoveredFullLabel = hover
+    ? (dateMeta.find((meta) => meta.date === hover.date)?.fullLabel ?? formatFullDate(hover.date))
+    : ''
 
   return (
-    <div
-      className="flex min-h-0 min-w-0 flex-1 overflow-visible"
-      onMouseLeave={() => setHover(null)}
-    >
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-visible" onMouseLeave={clearHover}>
       {/* Habit names — fixed beside the scrolling day grid, sharing its row metrics.
           Rows stay CELL tall so pitch matches the grid; overflow is visible so
           descenders can use the gap instead of being clipped by truncate. */}
@@ -350,7 +501,7 @@ export function HabitGrid({
                 habit={habit}
                 highlighted={hover?.habit.id === habit.id}
                 onDelete={() => onDeleteHabit(habit.id)}
-                onHover={() => setHover(null)}
+                onHover={clearHover}
               />
             ))}
           </div>
@@ -363,71 +514,15 @@ export function HabitGrid({
           onScroll={handleScroll}
           className="grid-scroll h-full overflow-x-auto overflow-y-hidden"
         >
-          <div className="flex flex-col" style={{ width: gridWidth, gap: GAP }}>
-            {/* Week axis: only Mondays are labelled. */}
-            <div className="relative" style={{ height: AXIS_H, width: gridWidth }}>
-              {dates.map((date, index) =>
-                isMonday(date) ? (
-                  <span
-                    key={date}
-                    className="absolute top-0 whitespace-nowrap text-[9.5px] font-medium leading-none tracking-wide text-ink-faint"
-                    style={{ left: index * COL }}
-                  >
-                    {formatWeekLabel(date)}
-                  </span>
-                ) : null
-              )}
-            </div>
-
-            {habits.map((habit) => {
-              const done = completedByHabit.get(habit.id)
-              return (
-                <div
-                  key={habit.id}
-                  className={cn(
-                    'flex transition-opacity duration-100',
-                    activeId === habit.id && 'opacity-40'
-                  )}
-                  style={{ height: CELL, gap: GAP }}
-                >
-                  {dates.map((date) => {
-                    const future = date > today
-                    const isDone = done?.has(date) ?? false
-                    return (
-                      <button
-                        key={date}
-                        type="button"
-                        tabIndex={-1}
-                        disabled={future}
-                        aria-label={`${habit.name} — ${formatFullDate(date)}`}
-                        aria-pressed={isDone}
-                        onClick={() => void toggle(habit.id, date)}
-                        onMouseEnter={(event) => {
-                          const rect = event.currentTarget.getBoundingClientRect()
-                          setHover({ habit, date, left: rect.left, top: rect.top })
-                        }}
-                        className={cn(
-                          'shrink-0 rounded-[3px] transition-[background-color,transform] duration-75',
-                          future
-                            ? 'cursor-default bg-cell/40'
-                            : isDone
-                              ? 'bg-done hover:bg-done-hover hover:scale-[1.18]'
-                              : 'bg-cell hover:bg-cell-hover hover:scale-[1.18]',
-                          date === today && 'today-ring'
-                        )}
-                        style={{
-                          width: CELL,
-                          height: CELL,
-                          outline: '1px solid var(--cell-ring)',
-                          outlineOffset: -1
-                        }}
-                      />
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
+          <CalendarMatrix
+            dateMeta={dateMeta}
+            habits={habits}
+            completedByHabit={completedByHabit}
+            gridWidth={gridWidth}
+            activeId={activeId}
+            onToggle={handleToggle}
+            onCellHover={handleCellHover}
+          />
         </div>
 
         {/* Hints that older history sits off-screen to the left. */}
@@ -441,46 +536,37 @@ export function HabitGrid({
         />
       </div>
 
-      {/* A single tooltip follows the hovered cell instead of one per square. */}
-      <Tooltip open={hover !== null} disableHoverableContent>
-        <TooltipTrigger asChild>
-          <span
-            aria-hidden
-            className="pointer-events-none fixed block"
-            style={{
-              left: hover?.left ?? 0,
-              top: hover?.top ?? 0,
-              width: CELL,
-              height: CELL
-            }}
-          />
-        </TooltipTrigger>
-        <TooltipContent
-          side="right"
-          align="center"
-          onPointerEnter={() => setHover(null)}
+      {/* Lightweight tooltip — positioned from the hovered cell, no Radix open-state loop. */}
+      {hover ? (
+        <div
+          role="tooltip"
+          className={cn(
+            'pointer-events-none fixed z-50 max-w-56 rounded-lg bg-tooltip px-2 py-1.5',
+            'text-[11px] leading-snug text-white shadow-lg shadow-black/25 ring-1 ring-white/10'
+          )}
+          style={{
+            left: hover.left,
+            top: hover.top,
+            transform: 'translateY(-50%)'
+          }}
         >
-          {hover ? (
-            <>
-              <div className="font-semibold">{hover.habit.name}</div>
-              <div className="text-white/70">{formatFullDate(hover.date)}</div>
-              <div className="mt-0.5 flex items-center gap-1 text-white/70">
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    hover.date > today
-                      ? 'bg-white/30'
-                      : hoveredDone
-                        ? 'bg-done'
-                        : 'bg-white/40'
-                  )}
-                />
-                {hover.date > today ? 'Upcoming' : hoveredDone ? 'Done' : 'Not done'}
-              </div>
-            </>
-          ) : null}
-        </TooltipContent>
-      </Tooltip>
+          <div className="font-semibold">{hover.habit.name}</div>
+          <div className="text-white/70">{hoveredFullLabel}</div>
+          <div className="mt-0.5 flex items-center gap-1 text-white/70">
+            <span
+              className={cn(
+                'h-1.5 w-1.5 rounded-full',
+                hover.date > today
+                  ? 'bg-white/30'
+                  : hoveredDone
+                    ? 'bg-done'
+                    : 'bg-white/40'
+              )}
+            />
+            {hover.date > today ? 'Upcoming' : hoveredDone ? 'Done' : 'Not done'}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

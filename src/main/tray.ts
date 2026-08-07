@@ -192,11 +192,18 @@ export function togglePopup(): void {
   }
 }
 
-export function createTray(icon: Electron.NativeImage): Tray {
-  tray = new Tray(icon)
-  tray.setToolTip('Habit Grid')
-
-  const menu = Menu.buildFromTemplate([
+function buildTrayMenu(): Menu {
+  const { openAtLogin } = app.getLoginItemSettings()
+  return Menu.buildFromTemplate([
+    {
+      label: 'Open at Login',
+      type: 'checkbox',
+      checked: openAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked })
+      }
+    },
+    { type: 'separator' },
     {
       label: 'Quit Habit Grid',
       click: () => {
@@ -205,11 +212,17 @@ export function createTray(icon: Electron.NativeImage): Tray {
       }
     }
   ])
+}
+
+export function createTray(icon: Electron.NativeImage): Tray {
+  tray = new Tray(icon)
+  tray.setToolTip('Habit Grid')
 
   // Use popUpContextMenu on right-click only — setContextMenu also opens on left-click.
+  // Rebuild each time so the Open at Login checkbox matches System Settings.
   tray.on('click', togglePopup)
   tray.on('right-click', () => {
-    tray?.popUpContextMenu(menu)
+    tray?.popUpContextMenu(buildTrayMenu())
   })
   return tray
 }

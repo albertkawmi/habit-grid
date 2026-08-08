@@ -33,7 +33,7 @@ app.whenReady().then(async () => {
     app.dock?.hide()
   }
 
-  initDb()
+  await initDb()
 
   const preloadPath = join(__dirname, '../preload/index.js')
   const popup = createPopup(preloadPath)

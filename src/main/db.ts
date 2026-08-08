@@ -1,6 +1,8 @@
-import Database from 'better-sqlite3'
 import { app } from 'electron'
-import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { createRequire } from 'module'
+import { dirname, join } from 'path'
+import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 
 export interface Habit {
   id: number
@@ -11,15 +13,54 @@ export interface Habit {
 
 export type CompletionsMap = Record<number, string[]>
 
-let db: Database.Database
+const require = createRequire(__filename)
 
-export function initDb(): void {
-  const dbPath = join(app.getPath('userData'), 'habit-grid.db')
-  db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+let db: Database
+let dbPath: string
 
-  db.exec(`
+function persist(): void {
+  const data = db.export()
+  writeFileSync(dbPath, Buffer.from(data))
+}
+
+function queryAll<T>(sql: string, params: SqlValue[] = []): T[] {
+  const stmt = db.prepare(sql)
+  try {
+    stmt.bind(params)
+    const rows: T[] = []
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as T)
+    }
+    return rows
+  } finally {
+    stmt.free()
+  }
+}
+
+function queryOne<T>(sql: string, params: SqlValue[] = []): T | undefined {
+  return queryAll<T>(sql, params)[0]
+}
+
+function run(sql: string, params: SqlValue[] = []): void {
+  db.run(sql, params)
+}
+
+export async function initDb(): Promise<void> {
+  const SQL = await initSqlJs({
+    locateFile: (file) => join(dirname(require.resolve('sql.js')), file)
+  })
+
+  dbPath = join(app.getPath('userData'), 'habit-grid.db')
+  if (existsSync(dbPath)) {
+    db = new SQL.Database(readFileSync(dbPath))
+  } else {
+    db = new SQL.Database()
+  }
+
+  // In-memory SQL.js; WAL does not apply. Persist via export() after writes.
+  run('PRAGMA foreign_keys = ON')
+
+  run(`
     CREATE TABLE IF NOT EXISTS habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -34,12 +75,14 @@ export function initDb(): void {
       FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
     );
   `)
+
+  persist()
 }
 
 export function listHabits(): Habit[] {
-  return db
-    .prepare('SELECT id, name, created_at, position FROM habits ORDER BY position ASC, id ASC')
-    .all() as Habit[]
+  return queryAll<Habit>(
+    'SELECT id, name, created_at, position FROM habits ORDER BY position ASC, id ASC'
+  )
 }
 
 export function addHabit(name: string): Habit {
@@ -48,18 +91,20 @@ export function addHabit(name: string): Habit {
     throw new Error('Habit name is required')
   }
 
-  const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS max FROM habits').get() as {
-    max: number
-  }
+  const maxPos = queryOne<{ max: number }>('SELECT COALESCE(MAX(position), -1) AS max FROM habits')
   const created_at = new Date().toISOString()
-  const position = maxPos.max + 1
+  const position = (maxPos?.max ?? -1) + 1
 
-  const result = db
-    .prepare('INSERT INTO habits (name, created_at, position) VALUES (?, ?, ?)')
-    .run(trimmed, created_at, position)
+  run('INSERT INTO habits (name, created_at, position) VALUES (?, ?, ?)', [
+    trimmed,
+    created_at,
+    position
+  ])
+  const row = queryOne<{ id: number }>('SELECT last_insert_rowid() AS id')
+  persist()
 
   return {
-    id: Number(result.lastInsertRowid),
+    id: Number(row?.id),
     name: trimmed,
     created_at,
     position
@@ -67,28 +112,32 @@ export function addHabit(name: string): Habit {
 }
 
 export function deleteHabit(id: number): void {
-  db.prepare('DELETE FROM habits WHERE id = ?').run(id)
+  run('DELETE FROM habits WHERE id = ?', [id])
+  persist()
 }
 
 /** Rewrite positions to match the given id order (0..n-1). */
 export function reorderHabits(orderedIds: number[]): void {
-  const update = db.prepare('UPDATE habits SET position = ? WHERE id = ?')
-  const apply = db.transaction((ids: number[]) => {
-    ids.forEach((id, position) => {
-      update.run(position, id)
+  run('BEGIN')
+  try {
+    orderedIds.forEach((id, position) => {
+      run('UPDATE habits SET position = ? WHERE id = ?', [position, id])
     })
-  })
-  apply(orderedIds)
+    run('COMMIT')
+    persist()
+  } catch (error) {
+    run('ROLLBACK')
+    throw error
+  }
 }
 
 export function getCompletions(startDate: string, endDate: string): CompletionsMap {
-  const rows = db
-    .prepare(
-      `SELECT habit_id, date FROM completions
-       WHERE date >= ? AND date <= ?
-       ORDER BY date ASC`
-    )
-    .all(startDate, endDate) as Array<{ habit_id: number; date: string }>
+  const rows = queryAll<{ habit_id: number; date: string }>(
+    `SELECT habit_id, date FROM completions
+     WHERE date >= ? AND date <= ?
+     ORDER BY date ASC`,
+    [startDate, endDate]
+  )
 
   const map: CompletionsMap = {}
   for (const row of rows) {
@@ -113,15 +162,18 @@ export function toggleCompletion(habitId: number, date: string): boolean {
     throw new Error('Cannot complete habits on a future date')
   }
 
-  const existing = db
-    .prepare('SELECT 1 FROM completions WHERE habit_id = ? AND date = ?')
-    .get(habitId, date)
+  const existing = queryOne<{ ok: number }>(
+    'SELECT 1 AS ok FROM completions WHERE habit_id = ? AND date = ?',
+    [habitId, date]
+  )
 
   if (existing) {
-    db.prepare('DELETE FROM completions WHERE habit_id = ? AND date = ?').run(habitId, date)
+    run('DELETE FROM completions WHERE habit_id = ? AND date = ?', [habitId, date])
+    persist()
     return false
   }
 
-  db.prepare('INSERT INTO completions (habit_id, date) VALUES (?, ?)').run(habitId, date)
+  run('INSERT INTO completions (habit_id, date) VALUES (?, ?)', [habitId, date])
+  persist()
   return true
 }

@@ -6,27 +6,26 @@
   "scripts": {
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "electron-vite build",
-    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
-    "postinstall": "electron-builder install-app-deps"
+    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "better-sqlite3": "^12.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "sql.js": "^1.14.1",
     "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^37.2.6",
     "electron-builder": "^26.0.12",

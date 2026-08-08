@@ -7,6 +7,67 @@ import { formatShortDate, todayKey } from '@/lib/dates'
 const HEADER_H = 36
 const MAIN_PADDING_Y = 20
 
+const TITLE_GLYPHS: Record<string, readonly string[]> = {
+  H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+  I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  G: ['01110', '10001', '10000', '10111', '10001', '10001', '01110'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+  D: ['11110', '10001', '10001', '10001', '10001', '10001', '11110']
+}
+
+function DottedTitle(): React.JSX.Element {
+  const pitch = 2.2
+  const rows = 9
+  const darkDots: { x: number; y: number }[] = []
+  let column = 2
+
+  for (const [index, letter] of [...'HABIT GRID'].entries()) {
+    if (letter === ' ') {
+      column += 3
+    } else {
+      const glyph = TITLE_GLYPHS[letter]
+      glyph.forEach((row, y) => {
+        row.split('').forEach((value, x) => {
+          if (value === '1') darkDots.push({ x: column + x, y: y + 1 })
+        })
+      })
+      column += 5
+    }
+    if (index < 'HABIT GRID'.length - 1) column += 1
+  }
+
+  const columns = column + 2
+
+  return (
+    <svg
+      role="img"
+      aria-label="Habit Grid"
+      viewBox={`0 0 ${columns * pitch} ${rows * pitch}`}
+      className="h-[20px] w-auto shrink-0 text-ink"
+    >
+      <defs>
+        <pattern id="title-dot-grid" width={pitch} height={pitch} patternUnits="userSpaceOnUse">
+          <circle cx={pitch / 2} cy={pitch / 2} r="0.52" fill="currentColor" opacity="0.14" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#title-dot-grid)" />
+      {darkDots.map(({ x, y }) => (
+        <circle
+          key={`${x}-${y}`}
+          cx={(x + 0.5) * pitch}
+          cy={(y + 0.5) * pitch}
+          r="0.68"
+          fill="currentColor"
+          opacity="0.92"
+        />
+      ))}
+    </svg>
+  )
+}
+
 interface AddHabitFormProps {
   onAdd: (name: string) => Promise<void>
 }
@@ -122,8 +183,10 @@ export default function App(): React.JSX.Element {
         className="flex shrink-0 items-center gap-2 border-b border-line px-3"
         style={{ height: HEADER_H }}
       >
-        <div className="flex items-baseline gap-2">
-          <h1 className="text-[12px] font-semibold tracking-tight text-ink">Habit Grid</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="flex">
+            <DottedTitle />
+          </h1>
           <span className="text-[10.5px] text-ink-faint">{formatShortDate(todayKey())}</span>
         </div>
 

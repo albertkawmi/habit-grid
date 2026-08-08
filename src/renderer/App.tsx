@@ -3,8 +3,9 @@ import { Plus } from 'lucide-react'
 import { HabitGrid, gridHeight, popupContentWidth } from '@/components/HabitGrid'
 import { Input } from '@/components/ui/input'
 import { formatShortDate, todayKey } from '@/lib/dates'
+import { cn } from '@/lib/utils'
 
-const HEADER_H = 36
+const HEADER_H = 24
 const MAIN_PADDING_Y = 20
 
 const TITLE_GLYPHS: Record<string, readonly string[]> = {
@@ -21,8 +22,9 @@ const TITLE_GLYPHS: Record<string, readonly string[]> = {
 function DottedTitle(): React.JSX.Element {
   const pitch = 2.2
   const rows = 9
+  const horizontalPadding = 5
   const darkDots: { x: number; y: number }[] = []
-  let column = 2
+  let column = horizontalPadding
 
   for (const [index, letter] of [...'HABIT GRID'].entries()) {
     if (letter === ' ') {
@@ -39,7 +41,7 @@ function DottedTitle(): React.JSX.Element {
     if (index < 'HABIT GRID'.length - 1) column += 1
   }
 
-  const columns = column + 2
+  const columns = column + horizontalPadding
 
   return (
     <svg
@@ -75,7 +77,9 @@ interface AddHabitFormProps {
 /** Owns the controlled input so keystrokes do not re-render the habit grid. */
 function AddHabitForm({ onAdd }: AddHabitFormProps): React.JSX.Element {
   const [name, setName] = useState('')
+  const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const expanded = focused || name.length > 0
 
   const handleSubmit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -88,16 +92,26 @@ function AddHabitForm({ onAdd }: AddHabitFormProps): React.JSX.Element {
 
   return (
     <form className="ml-auto flex min-w-0 items-center" onSubmit={(e) => void handleSubmit(e)}>
-      <div className="relative w-[160px]">
+      <div
+        className={cn(
+          'relative transition-[width] duration-150 ease-out',
+          expanded ? 'w-[8.75rem]' : 'w-[6.125rem]'
+        )}
+      >
         <Plus className="pointer-events-none absolute left-1.5 top-1/2 h-2.5 w-2.5 -translate-y-1/2 text-ink-faint" />
         <Input
           ref={inputRef}
           value={name}
           onChange={(event) => setName(event.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder="Add a habit…"
           maxLength={40}
           aria-label="New habit name"
-          className="h-6 pl-5 text-[10.5px]"
+          className={cn(
+            'h-6 pl-5 pr-1.5 text-[10.5px] ring-0 transition-colors duration-150 focus:ring-0',
+            expanded ? 'bg-ink/[0.05]' : 'bg-transparent'
+          )}
         />
       </div>
     </form>
@@ -180,7 +194,7 @@ export default function App(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface">
       <header
-        className="flex shrink-0 items-center gap-2 border-b border-line px-3"
+        className="flex shrink-0 items-center gap-2 border-b border-line"
         style={{ height: HEADER_H }}
       >
         <div className="flex items-center gap-2">

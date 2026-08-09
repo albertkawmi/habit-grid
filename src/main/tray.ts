@@ -2,9 +2,10 @@ import { app, BrowserWindow, Menu, nativeImage, nativeTheme, screen, Tray } from
 import { existsSync } from 'fs'
 import { join } from 'path'
 
-// Fits habit names + 3 full weeks (previous / current / following).
-// Must match HabitGrid.popupContentWidth(): NAME_W(116) + px-3(24) + 21*15-3 = 452
-const POPUP_WIDTH = 452
+// Fits habit names + default visible range (previous Monday through today+7).
+// Floor = Monday case (15 days). Must stay ≤ HabitGrid.popupContentWidth() min:
+// NAME_W(116) + px-3(24) + 15*15-3 = 362. Renderer widens up to 21 days on Sunday.
+const POPUP_WIDTH = 362
 const MIN_HEIGHT = 130
 const MAX_HEIGHT = 460
 const TRAY_GAP = 6
@@ -132,7 +133,7 @@ export function resizePopup(height: number, width?: number): void {
 
   const nextHeight = Math.round(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height)))
   const nextWidth = Math.round(
-    typeof width === 'number' && Number.isFinite(width) ? Math.max(POPUP_WIDTH, width) : POPUP_WIDTH
+    typeof width === 'number' && Number.isFinite(width) ? width : POPUP_WIDTH
   )
   const bounds = popup.getBounds()
   if (bounds.height === nextHeight && bounds.width === nextWidth) return

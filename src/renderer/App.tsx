@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { HabitGrid, gridHeight, popupContentWidth } from '@/components/HabitGrid'
 import { Input } from '@/components/ui/input'
-import { formatShortDate, todayKey } from '@/lib/dates'
 import { cn } from '@/lib/utils'
 
 const HEADER_H = 24
@@ -197,12 +196,9 @@ export default function App(): React.JSX.Element {
         className="flex shrink-0 items-center gap-2 border-b border-line"
         style={{ height: HEADER_H }}
       >
-        <div className="flex items-center gap-2">
-          <h1 className="flex">
-            <DottedTitle />
-          </h1>
-          <span className="text-[10.5px] text-ink-faint">{formatShortDate(todayKey())}</span>
-        </div>
+        <h1 className="flex">
+          <DottedTitle />
+        </h1>
 
         <AddHabitForm onAdd={addHabit} />
       </header>

@@ -37,31 +37,27 @@ const NAME_W = 116
 const MAIN_PADDING_X = 24 // matches main `px-3` (12 + 12)
 const INITIAL_WEEKS = 26
 const EXTEND_WEEKS = 26
-/** Previous week + current week + following week. */
-const VISIBLE_WEEKS = 3
-const VISIBLE_DAYS = VISIBLE_WEEKS * 7
-
 /** Monday of the previous week — left edge of the default viewport. */
 export function visibleStart(today: string = todayKey()): string {
   return addDays(startOfWeek(today), -7)
 }
 
-/** Sunday of next week — right edge of the default viewport. */
+/** Seven days after today — right edge of the grid. */
 export function horizonEnd(today: string = todayKey()): string {
-  return addDays(startOfWeek(today), 13)
+  return addDays(today, 7)
 }
 
-/** Always 21 days: previous + current + following week. */
-export function visibleDayCount(): number {
-  return VISIBLE_DAYS
+/** Previous Monday through today+7 (15–21 days depending on weekday). */
+export function visibleDayCount(today: string = todayKey()): number {
+  return daysBetween(visibleStart(today), horizonEnd(today)) + 1
 }
 
 /**
- * Window width that fits habit names + three full weeks of day cells.
- * NAME_W(116) + main px-3(24) + 21*(12+3)-3 = 452
+ * Window width that fits habit names + the default visible day range.
+ * NAME_W(116) + main px-3(24) + days*(12+3)-3
  */
-export function popupContentWidth(): number {
-  return NAME_W + MAIN_PADDING_X + VISIBLE_DAYS * COL - GAP
+export function popupContentWidth(today: string = todayKey()): number {
+  return NAME_W + MAIN_PADDING_X + visibleDayCount(today) * COL - GAP
 }
 
 /** Height the grid needs so the window can be sized to fit its rows exactly. */
@@ -88,7 +84,7 @@ interface DateMeta {
 
 interface HabitGridProps {
   habits: Habit[]
-  /** Bumped by the shell to force a reload and re-align the 3-week view. */
+  /** Bumped by the shell to force a reload and re-align the default viewport. */
   refreshKey: number
   onDeleteHabit: (id: number) => void
   onReorderHabits: (orderedIds: number[]) => void
@@ -340,7 +336,7 @@ export function HabitGrid({
     () => startOfWeek(addDays(today, -weeksBack * 7)),
     [today, weeksBack]
   )
-  // Through Sunday of next week (previous + current + following week).
+  // Through today + 7 days (rolling horizon).
   const end = useMemo(() => horizonEnd(today), [today])
   const dates = useMemo(() => dateRange(start, end), [start, end])
   const gridWidth = dates.length * COL - GAP
@@ -381,7 +377,7 @@ export function HabitGrid({
     }
   }, [start, end, habits, refreshKey])
 
-  // Snap so previous / current / next week fill the viewport with no scrolling needed.
+  // Snap so previous week … today+7 fill the viewport with no scrolling needed.
   const alignVisibleRange = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return

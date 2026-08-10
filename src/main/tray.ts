@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, screen, Tray } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { showStatsWindow } from './stats-window'
 
 // Fits habit names + default visible range (previous Monday through today+7).
 // Floor = Monday case (15 days). Must stay ≤ HabitGrid.popupContentWidth() min:
@@ -202,6 +203,13 @@ function buildTrayMenu(): Menu {
       checked: openAtLogin,
       click: (item) => {
         app.setLoginItemSettings({ openAtLogin: item.checked })
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Stats…',
+      click: () => {
+        void showStatsWindow()
       }
     },
     { type: 'separator' },

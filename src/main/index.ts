@@ -9,6 +9,8 @@ import {
   reorderHabits,
   toggleCompletion
 } from './db'
+import { getStats } from './stats'
+import { destroyStatsWindow, initStatsWindow } from './stats-window'
 import {
   createPopup,
   createTray,
@@ -36,6 +38,7 @@ app.whenReady().then(async () => {
   await initDb()
 
   const preloadPath = join(__dirname, '../preload/index.js')
+  initStatsWindow(preloadPath)
   const popup = createPopup(preloadPath)
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -60,6 +63,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('completions:toggle', (_event, habitId: number, date: string) =>
     toggleCompletion(habitId, date)
   )
+  ipcMain.handle('stats:get', () => getStats())
   ipcMain.handle('app:resize', (_event, height: number, width: number) => {
     resizePopup(height, width)
   })
@@ -74,4 +78,5 @@ app.on('before-quit', () => {
   if (popup && !popup.isDestroyed()) {
     popup.destroy()
   }
+  destroyStatsWindow()
 })

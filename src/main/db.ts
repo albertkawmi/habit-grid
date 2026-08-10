@@ -149,7 +149,23 @@ export function getCompletions(startDate: string, endDate: string): CompletionsM
   return map
 }
 
-function todayLocal(): string {
+/** All completion dates per habit, ordered ascending — used for stats. */
+export function getAllCompletions(): CompletionsMap {
+  const rows = queryAll<{ habit_id: number; date: string }>(
+    `SELECT habit_id, date FROM completions ORDER BY date ASC`
+  )
+
+  const map: CompletionsMap = {}
+  for (const row of rows) {
+    if (!map[row.habit_id]) {
+      map[row.habit_id] = []
+    }
+    map[row.habit_id].push(row.date)
+  }
+  return map
+}
+
+export function todayLocal(): string {
   const now = new Date()
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')

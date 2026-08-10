@@ -9,6 +9,29 @@ export interface Habit {
 
 export type CompletionsMap = Record<number, string[]>
 
+export interface HabitStats {
+  habitId: number
+  name: string
+  firstDate: string | null
+  trackedDays: number
+  completedDays: number
+  compliance: number
+  bestStreak: number
+  currentStreak: number
+  weeklyAverage: number
+}
+
+export interface AggregateStats {
+  totalCompletions: number
+  overallCompliance: number
+}
+
+export interface StatsPayload {
+  habits: HabitStats[]
+  aggregate: AggregateStats
+  asOf: string
+}
+
 const api = {
   listHabits: (): Promise<Habit[]> => ipcRenderer.invoke('habits:list'),
   addHabit: (name: string): Promise<Habit> => ipcRenderer.invoke('habits:add', name),
@@ -19,6 +42,7 @@ const api = {
     ipcRenderer.invoke('completions:getRange', startDate, endDate),
   toggleCompletion: (habitId: number, date: string): Promise<boolean> =>
     ipcRenderer.invoke('completions:toggle', habitId, date),
+  getStats: (): Promise<StatsPayload> => ipcRenderer.invoke('stats:get'),
   resize: (height: number, width: number): Promise<void> =>
     ipcRenderer.invoke('app:resize', height, width)
 }

@@ -15,6 +15,8 @@ import {
   createPopup,
   createTray,
   getPopup,
+  persistPopupWidth,
+  refreshPopupWidthLimits,
   resizePopup,
   resolveTrayIcon
 } from './tray'
@@ -50,9 +52,14 @@ app.whenReady().then(async () => {
   createTray(resolveTrayIcon())
 
   ipcMain.handle('habits:list', () => listHabits())
-  ipcMain.handle('habits:add', (_event, name: string) => addHabit(name))
+  ipcMain.handle('habits:add', (_event, name: string) => {
+    const habit = addHabit(name)
+    refreshPopupWidthLimits()
+    return habit
+  })
   ipcMain.handle('habits:delete', (_event, id: number) => {
     deleteHabit(id)
+    refreshPopupWidthLimits()
   })
   ipcMain.handle('habits:reorder', (_event, orderedIds: number[]) => {
     reorderHabits(orderedIds)
@@ -60,12 +67,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('completions:getRange', (_event, startDate: string, endDate: string) =>
     getCompletions(startDate, endDate)
   )
-  ipcMain.handle('completions:toggle', (_event, habitId: number, date: string) =>
-    toggleCompletion(habitId, date)
-  )
+  ipcMain.handle('completions:toggle', (_event, habitId: number, date: string) => {
+    const done = toggleCompletion(habitId, date)
+    refreshPopupWidthLimits()
+    return done
+  })
   ipcMain.handle('stats:get', () => getStats())
-  ipcMain.handle('app:resize', (_event, height: number, width: number) => {
-    resizePopup(height, width)
+  ipcMain.handle('app:resize', (_event, height: number) => {
+    resizePopup(height)
   })
 })
 
@@ -74,6 +83,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  persistPopupWidth()
   const popup = getPopup()
   if (popup && !popup.isDestroyed()) {
     popup.destroy()

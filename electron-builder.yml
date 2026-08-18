@@ -1,0 +1,23 @@
+appId: com.albert.habit-grid
+productName: Habit Grid
+directories:
+  output: dist
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!scripts/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+extraResources:
+  - from: node_modules/sql.js/dist/sql-wasm.wasm
+    to: sql-wasm.wasm
+mac:
+  category: public.app-category.productivity
+  identity: null
+  target:
+    - target: dir
+      arch:
+        - arm64
+npmRebuild: false

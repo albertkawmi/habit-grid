@@ -20,45 +20,25 @@ import { Check, GripVertical, X } from 'lucide-react'
 import {
   addDays,
   dateRange,
-  daysBetween,
   formatFullDate,
+  formatShortDate,
   formatWeekLabel,
   isMonday,
   startOfWeek,
   todayKey
 } from '@/lib/dates'
 import { cn } from '@/lib/utils'
+import {
+  AXIS_H,
+  CELL,
+  COL,
+  GAP,
+  NAME_W,
+  horizonEnd
+} from '../../shared/popup-layout'
 
-const CELL = 12
-const GAP = 3
-const COL = CELL + GAP
-const AXIS_H = 16
-const NAME_W = 116
-const MAIN_PADDING_X = 24 // matches main `px-3` (12 + 12)
 const INITIAL_WEEKS = 26
 const EXTEND_WEEKS = 26
-/** Monday of the previous week — left edge of the default viewport. */
-export function visibleStart(today: string = todayKey()): string {
-  return addDays(startOfWeek(today), -7)
-}
-
-/** Seven days after today — right edge of the grid. */
-export function horizonEnd(today: string = todayKey()): string {
-  return addDays(today, 7)
-}
-
-/** Previous Monday through today+7 (15–21 days depending on weekday). */
-export function visibleDayCount(today: string = todayKey()): number {
-  return daysBetween(visibleStart(today), horizonEnd(today)) + 1
-}
-
-/**
- * Window width that fits habit names + the default visible day range.
- * NAME_W(116) + main px-3(24) + days*(12+3)-3
- */
-export function popupContentWidth(today: string = todayKey()): number {
-  return NAME_W + MAIN_PADDING_X + visibleDayCount(today) * COL - GAP
-}
 
 /** Height the grid needs so the window can be sized to fit its rows exactly. */
 export function gridHeight(habitCount: number): number {
@@ -105,6 +85,7 @@ interface CalendarMatrixProps {
   activeId: number | null
   onToggle: (habitId: number, date: string) => void
   onCellHover: (habit: Habit, date: string, left: number, top: number) => void
+  onCellLeave: () => void
 }
 
 function SortableHabitName({
@@ -227,7 +208,8 @@ const CalendarMatrix = memo(function CalendarMatrix({
   gridWidth,
   activeId,
   onToggle,
-  onCellHover
+  onCellHover,
+  onCellLeave
 }: CalendarMatrixProps): React.JSX.Element {
   return (
     <div className="flex flex-col" style={{ width: gridWidth, gap: GAP }}>
@@ -265,6 +247,7 @@ const CalendarMatrix = memo(function CalendarMatrix({
                   type="button"
                   tabIndex={-1}
                   disabled={meta.future}
+                  data-habit-cell=""
                   aria-label={`${habit.name} — ${meta.fullLabel}`}
                   aria-pressed={isDone}
                   onClick={() => onToggle(habit.id, meta.date)}
@@ -277,6 +260,19 @@ const CalendarMatrix = memo(function CalendarMatrix({
                       rect.right + 6,
                       rect.top + rect.height / 2
                     )
+                  }}
+                  onMouseLeave={(event) => {
+                    // Keep the tip when sliding onto another interactive cell; clear for
+                    // gaps, chrome, and disabled cells (which often skip mouseenter).
+                    const next = event.relatedTarget
+                    if (
+                      next instanceof HTMLButtonElement &&
+                      next.dataset.habitCell !== undefined &&
+                      !next.disabled
+                    ) {
+                      return
+                    }
+                    onCellLeave()
                   }}
                   className={cn(
                     'shrink-0 rounded-[3px] transition-[background-color,transform] duration-75',
@@ -324,6 +320,7 @@ export function HabitGrid({
   const tooltipRef = useRef<HTMLDivElement>(null)
   // Distance from the right edge, preserved while prepending older columns.
   const rightAnchor = useRef<number | null>(null)
+  const prevViewportWidth = useRef(0)
 
   const habitIds = useMemo(() => habits.map((habit) => habit.id), [habits])
 
@@ -331,6 +328,12 @@ export function HabitGrid({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+
+  const weeksToFill = useMemo(() => {
+    if (viewportWidth <= 0) return INITIAL_WEEKS
+    const days = Math.ceil((viewportWidth + GAP) / COL)
+    return Math.max(INITIAL_WEEKS, Math.ceil(days / 7) + 1)
+  }, [viewportWidth])
 
   const start = useMemo(
     () => startOfWeek(addDays(today, -weeksBack * 7)),
@@ -340,10 +343,6 @@ export function HabitGrid({
   const end = useMemo(() => horizonEnd(today), [today])
   const dates = useMemo(() => dateRange(start, end), [start, end])
   const gridWidth = dates.length * COL - GAP
-  const homeScroll = useMemo(
-    () => Math.max(0, daysBetween(start, visibleStart(today)) * COL),
-    [start, today]
-  )
 
   // Locale formatting once per date-range change — not on every hover/render.
   const dateMeta = useMemo<DateMeta[]>(
@@ -377,13 +376,13 @@ export function HabitGrid({
     }
   }, [start, end, habits, refreshKey])
 
-  // Snap so previous week … today+7 fill the viewport with no scrolling needed.
-  const alignVisibleRange = useCallback(() => {
+  // Pin the future horizon to the right edge of the viewport.
+  const alignToHorizon = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return
-    el.scrollLeft = homeScroll
+    el.scrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
     setCanScrollLeft(el.scrollLeft > 2)
-  }, [homeScroll])
+  }, [])
 
   useLayoutEffect(() => {
     const el = scrollerRef.current
@@ -395,11 +394,37 @@ export function HabitGrid({
   }, [])
 
   useLayoutEffect(() => {
+    setWeeksBack((weeks) => {
+      if (weeksToFill <= weeks) return weeks
+      const el = scrollerRef.current
+      if (el) rightAnchor.current = el.scrollWidth - el.scrollLeft
+      return weeksToFill
+    })
+  }, [weeksToFill])
+
+  // Reopening the popup snaps back to today+7 on the right.
+  useLayoutEffect(() => {
     if (viewportWidth === 0) return
-    alignVisibleRange()
-    // Only re-align on an explicit refresh, never when older weeks load in.
+    alignToHorizon()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, viewportWidth])
+  }, [refreshKey])
+
+  // Extra width reveals the past: keep the right edge on the same date.
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!el || viewportWidth === 0) return
+
+    const prev = prevViewportWidth.current
+    prevViewportWidth.current = viewportWidth
+
+    if (prev === 0) {
+      alignToHorizon()
+      return
+    }
+
+    el.scrollLeft = Math.max(0, el.scrollLeft - (viewportWidth - prev))
+    setCanScrollLeft(el.scrollLeft > 2)
+  }, [viewportWidth, alignToHorizon])
 
   // Map vertical wheel / trackpad to horizontal time scroll. Native overflow is
   // x-only and the scrollbar is hidden, so without this most scroll gestures do nothing.
@@ -506,11 +531,9 @@ export function HabitGrid({
 
   const hoveredDone =
     hover !== null && (completedByHabit.get(hover.habit.id)?.has(hover.date) ?? false)
-  const hoveredFullLabel = hover
-    ? (dateMeta.find((meta) => meta.date === hover.date)?.fullLabel ?? formatFullDate(hover.date))
-    : ''
+  const hoveredDateLabel = hover ? formatShortDate(hover.date) : ''
 
-  // Prefer right-of-cell, vertically centered; shift/flip when the popup edge would clip.
+  // Prefer right-of-cell, vertically centered; flip left when the popup edge would clip.
   useLayoutEffect(() => {
     if (!hover) {
       setTipPos(null)
@@ -538,7 +561,7 @@ export function HabitGrid({
     if (left < margin) left = margin
 
     setTipPos({ left, top })
-  }, [hover, hoveredDone, hoveredFullLabel])
+  }, [hover, hoveredDone, hoveredDateLabel])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-visible" onMouseLeave={clearHover}>
@@ -585,6 +608,7 @@ export function HabitGrid({
             activeId={activeId}
             onToggle={handleToggle}
             onCellHover={handleCellHover}
+            onCellLeave={clearHover}
           />
         </div>
 
@@ -605,8 +629,8 @@ export function HabitGrid({
           ref={tooltipRef}
           role="tooltip"
           className={cn(
-            'pointer-events-none fixed z-50 max-w-56 rounded-lg bg-tooltip px-2 py-1.5',
-            'text-[11px] leading-snug text-white shadow-lg shadow-black/25 ring-1 ring-white/10',
+            'pointer-events-none fixed z-50 max-w-40 rounded-lg bg-tooltip px-2 py-1.5',
+            'break-words text-[11px] leading-snug text-white shadow-lg shadow-black/25 ring-1 ring-white/10',
             !tipPos && 'invisible'
           )}
           style={{
@@ -615,7 +639,7 @@ export function HabitGrid({
           }}
         >
           <div className="font-semibold">{hover.habit.name}</div>
-          <div className="text-white/70">{hoveredFullLabel}</div>
+          <div className="text-white/70">{hoveredDateLabel}</div>
           <div className="mt-0.5 flex items-center gap-1 text-white/70">
             <span
               className={cn(

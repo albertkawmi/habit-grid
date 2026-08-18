@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "Habit tracking grid in the system tray",
   "main": "./out/main/index.js",
+  "author": "Albert",
   "scripts": {
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "electron-vite build",
-    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview"
+    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "install:mac": "bash scripts/install-mac.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

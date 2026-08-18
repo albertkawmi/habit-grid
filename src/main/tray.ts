@@ -1,24 +1,123 @@
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, screen, Tray } from 'electron'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { maxPopupWidth, minPopupWidth } from '../shared/popup-layout'
+import { getEarliestEntryDate } from './db'
 import { showStatsWindow } from './stats-window'
 
-// Fits habit names + default visible range (previous Monday through today+7).
-// Floor = Monday case (15 days). Must stay ≤ HabitGrid.popupContentWidth() min:
-// NAME_W(116) + px-3(24) + 15*15-3 = 362. Renderer widens up to 21 days on Sunday.
-const POPUP_WIDTH = 362
 const MIN_HEIGHT = 130
 const MAX_HEIGHT = 460
 const TRAY_GAP = 6
+const SCREEN_MARGIN = 16
+const WIDTH_STATE_FILE = 'popup-width.json'
 
 let tray: Tray | null = null
 let popup: BrowserWindow | null = null
 let hideOnBlurTimer: ReturnType<typeof setTimeout> | null = null
+let saveWidthTimer: ReturnType<typeof setTimeout> | null = null
 /** Ignore blur-hide until this time — accessory/tray focus is flaky right after show. */
 let ignoreBlurUntil = 0
+/** Height the renderer last requested; vertical resize is locked to this. */
+let lockedHeight = MIN_HEIGHT
+/** True while we are applying bounds ourselves — skip persist / height-fix recursion. */
+let applyingBounds = false
 
 function surfaceColor(): string {
   return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#ffffff'
+}
+
+function widthStatePath(): string {
+  return join(app.getPath('userData'), WIDTH_STATE_FILE)
+}
+
+function readSavedWidth(): number | null {
+  try {
+    const raw = JSON.parse(readFileSync(widthStatePath(), 'utf8')) as { width?: unknown }
+    if (typeof raw.width === 'number' && Number.isFinite(raw.width) && raw.width > 0) {
+      return Math.round(raw.width)
+    }
+  } catch {
+    // Missing or invalid state — fall back to the default viewport width.
+  }
+  return null
+}
+
+function writeSavedWidth(width: number): void {
+  writeFileSync(widthStatePath(), `${JSON.stringify({ width: Math.round(width) })}\n`)
+}
+
+function persistWidthSoon(): void {
+  if (saveWidthTimer !== null) clearTimeout(saveWidthTimer)
+  saveWidthTimer = setTimeout(() => {
+    saveWidthTimer = null
+    if (!popup || popup.isDestroyed()) return
+    writeSavedWidth(popup.getBounds().width)
+  }, 200)
+}
+
+function workAreaMaxWidth(): number {
+  const point = tray
+    ? { x: tray.getBounds().x, y: tray.getBounds().y }
+    : popup && !popup.isDestroyed()
+      ? { x: popup.getBounds().x, y: popup.getBounds().y }
+      : screen.getCursorScreenPoint()
+  const { workArea } = screen.getDisplayNearestPoint(point)
+  return workArea.width - SCREEN_MARGIN
+}
+
+function widthLimits(): { min: number; max: number } {
+  const min = Math.round(minPopupWidth())
+  const dataMax = Math.round(maxPopupWidth(getEarliestEntryDate()))
+  const max = Math.max(min, Math.min(dataMax, workAreaMaxWidth()))
+  return { min, max }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function withBounds(fn: () => void): void {
+  applyingBounds = true
+  try {
+    fn()
+  } finally {
+    applyingBounds = false
+  }
+}
+
+/** Lock height and apply min/max width. Optionally set an explicit width. */
+function applyWindowBox(height: number, width?: number): void {
+  if (!popup || popup.isDestroyed()) return
+
+  const { min, max } = widthLimits()
+  const nextHeight = Math.round(clamp(height, MIN_HEIGHT, MAX_HEIGHT))
+  const bounds = popup.getBounds()
+  const nextWidth = Math.round(
+    clamp(typeof width === 'number' && Number.isFinite(width) ? width : bounds.width, min, max)
+  )
+  lockedHeight = nextHeight
+
+  const [minW, minH] = popup.getMinimumSize()
+  const [maxW, maxH] = popup.getMaximumSize()
+  if (
+    bounds.width === nextWidth &&
+    bounds.height === nextHeight &&
+    minW === min &&
+    maxW === max &&
+    minH === nextHeight &&
+    maxH === nextHeight
+  ) {
+    return
+  }
+
+  withBounds(() => {
+    // Temporarily lift limits so Electron will accept the new box, then re-lock.
+    popup!.setMinimumSize(1, 1)
+    popup!.setMaximumSize(16384, 16384)
+    popup!.setSize(nextWidth, nextHeight, false)
+    popup!.setMinimumSize(min, nextHeight)
+    popup!.setMaximumSize(max, nextHeight)
+  })
 }
 
 function clearHideOnBlurTimer(): void {
@@ -73,16 +172,25 @@ export function getPopup(): BrowserWindow | null {
 }
 
 export function createPopup(preloadPath: string): BrowserWindow {
+  const { min, max } = widthLimits()
+  const saved = readSavedWidth()
+  const width = clamp(saved ?? min, min, max)
+  lockedHeight = MIN_HEIGHT
+
   popup = new BrowserWindow({
-    width: POPUP_WIDTH,
+    width,
     height: MIN_HEIGHT,
+    minWidth: min,
+    maxWidth: max,
+    minHeight: MIN_HEIGHT,
+    maxHeight: MIN_HEIGHT,
     show: false,
     frame: false,
     // macOS draws the rounded corners and drop shadow for frameless windows.
     roundedCorners: true,
     hasShadow: true,
     backgroundColor: surfaceColor(),
-    resizable: false,
+    resizable: true,
     movable: false,
     minimizable: false,
     maximizable: false,
@@ -120,33 +228,62 @@ export function createPopup(preloadPath: string): BrowserWindow {
     }
   })
 
+  // Width-only: keep the vertical box fixed while the user drags an edge.
+  popup.on('will-resize', (_event, newBounds) => {
+    const current = popup!.getBounds()
+    newBounds.height = current.height
+    newBounds.y = current.y
+  })
+
+  popup.on('resize', () => {
+    if (!popup || popup.isDestroyed() || applyingBounds) return
+    const bounds = popup.getBounds()
+    if (bounds.height !== lockedHeight) {
+      withBounds(() => {
+        popup!.setSize(bounds.width, lockedHeight, false)
+      })
+    }
+    // Geometry changes can jostle focus on accessory windows — don't treat as dismiss.
+    ignoreBlurUntil = Math.max(ignoreBlurUntil, Date.now() + 250)
+    persistWidthSoon()
+  })
+
   popup.on('closed', () => {
     clearHideOnBlurTimer()
+    if (saveWidthTimer !== null) {
+      clearTimeout(saveWidthTimer)
+      saveWidthTimer = null
+    }
     popup = null
   })
 
   return popup
 }
 
-/** Sizes the popup to the dimensions the renderer reports for its content. */
-export function resizePopup(height: number, width?: number): void {
+/** Sizes the popup height to the content the renderer reports. Width is user-owned. */
+export function resizePopup(height: number): void {
   if (!popup || popup.isDestroyed()) return
 
-  const nextHeight = Math.round(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height)))
-  const nextWidth = Math.round(
-    typeof width === 'number' && Number.isFinite(width) ? width : POPUP_WIDTH
-  )
+  const nextHeight = Math.round(clamp(height, MIN_HEIGHT, MAX_HEIGHT))
   const bounds = popup.getBounds()
-  if (bounds.height === nextHeight && bounds.width === nextWidth) return
+  if (bounds.height === nextHeight && lockedHeight === nextHeight) {
+    refreshPopupWidthLimits()
+    return
+  }
 
-  // Geometry changes can jostle focus on accessory windows — don't treat as dismiss.
   if (popup.isVisible()) {
     ignoreBlurUntil = Math.max(ignoreBlurUntil, Date.now() + 250)
   }
-  popup.setSize(nextWidth, nextHeight, false)
+  applyWindowBox(nextHeight)
   if (popup.isVisible()) {
     positionNearTray()
   }
+}
+
+/** Recompute min/max width after habit data changes (clamps if the current width is now illegal). */
+export function refreshPopupWidthLimits(): void {
+  if (!popup || popup.isDestroyed()) return
+  applyWindowBox(lockedHeight)
 }
 
 function positionNearTray(): void {
@@ -164,7 +301,9 @@ function positionNearTray(): void {
     y = Math.round(trayBounds.y - height - TRAY_GAP)
   }
 
-  popup.setPosition(x, y, false)
+  withBounds(() => {
+    popup!.setPosition(x, y, false)
+  })
 }
 
 export function showPopup(): void {
@@ -173,14 +312,26 @@ export function showPopup(): void {
   // Focus often fails to stick under activationPolicy: 'accessory'; suppress
   // blur-hide briefly so show-then-vanish races don't dismiss the popup.
   ignoreBlurUntil = Date.now() + 400
+  refreshPopupWidthLimits()
   positionNearTray()
   popup.show()
   popup.focus()
 }
 
+export function persistPopupWidth(): void {
+  if (saveWidthTimer !== null) {
+    clearTimeout(saveWidthTimer)
+    saveWidthTimer = null
+  }
+  if (popup && !popup.isDestroyed()) {
+    writeSavedWidth(popup.getBounds().width)
+  }
+}
+
 export function hidePopup(): void {
   clearHideOnBlurTimer()
   if (popup && !popup.isDestroyed() && popup.isVisible()) {
+    persistPopupWidth()
     popup.hide()
   }
 }

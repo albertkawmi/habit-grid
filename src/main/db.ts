@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import initSqlJs, { type Database, type SqlValue } from 'sql.js'
+import { formatDateKey } from '../shared/dates'
 
 export interface Habit {
   id: number
@@ -45,9 +46,16 @@ function run(sql: string, params: SqlValue[] = []): void {
   db.run(sql, params)
 }
 
+function sqlWasmPath(file: string): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, file)
+  }
+  return join(dirname(require.resolve('sql.js')), file)
+}
+
 export async function initDb(): Promise<void> {
   const SQL = await initSqlJs({
-    locateFile: (file) => join(dirname(require.resolve('sql.js')), file)
+    locateFile: (file) => sqlWasmPath(file)
   })
 
   dbPath = join(app.getPath('userData'), 'habit-grid.db')
@@ -166,11 +174,24 @@ export function getAllCompletions(): CompletionsMap {
 }
 
 export function todayLocal(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+  return formatDateKey(new Date())
+}
+
+/**
+ * Earliest recorded date across habits: first completion, or habit creation
+ * if nothing has been logged yet.
+ */
+export function getEarliestEntryDate(): string | null {
+  const completion = queryOne<{ d: string | null }>('SELECT MIN(date) AS d FROM completions')?.d
+  const createdIso = queryOne<{ d: string | null }>(
+    'SELECT MIN(created_at) AS d FROM habits'
+  )?.d
+  const created = createdIso ? formatDateKey(new Date(createdIso)) : null
+
+  const keys = [completion, created].filter((key): key is string => Boolean(key))
+  if (keys.length === 0) return null
+  keys.sort()
+  return keys[0]
 }
 
 export function toggleCompletion(habitId: number, date: string): boolean {

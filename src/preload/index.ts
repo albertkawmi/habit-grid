@@ -43,8 +43,7 @@ const api = {
   toggleCompletion: (habitId: number, date: string): Promise<boolean> =>
     ipcRenderer.invoke('completions:toggle', habitId, date),
   getStats: (): Promise<StatsPayload> => ipcRenderer.invoke('stats:get'),
-  resize: (height: number, width: number): Promise<void> =>
-    ipcRenderer.invoke('app:resize', height, width)
+  resize: (height: number): Promise<void> => ipcRenderer.invoke('app:resize', height)
 }
 
 contextBridge.exposeInMainWorld('api', api)

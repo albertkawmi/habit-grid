@@ -42,7 +42,7 @@ interface HabitGridApi {
   getCompletions: (startDate: string, endDate: string) => Promise<CompletionsMap>
   toggleCompletion: (habitId: number, date: string) => Promise<boolean>
   getStats: () => Promise<StatsPayload>
-  resize: (height: number, width: number) => Promise<void>
+  resize: (height: number) => Promise<void>
 }
 
 interface Window {

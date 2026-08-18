@@ -1,3 +1,4 @@
+import { addDays, daysBetween } from '../shared/dates'
 import { getAllCompletions, listHabits, todayLocal } from './db'
 
 export interface HabitStats {
@@ -21,26 +22,6 @@ export interface StatsPayload {
   habits: HabitStats[]
   aggregate: AggregateStats
   asOf: string
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000
-
-function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
-function addDays(key: string, days: number): string {
-  const date = parseDateKey(key)
-  date.setDate(date.getDate() + days)
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function daysBetween(start: string, end: string): number {
-  return Math.round((parseDateKey(end).getTime() - parseDateKey(start).getTime()) / DAY_MS)
 }
 
 function bestStreak(dates: Set<string>, firstDate: string, today: string): number {

@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
-import { HabitGrid, gridHeight, popupContentWidth } from '@/components/HabitGrid'
+import { HabitGrid, gridHeight } from '@/components/HabitGrid'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
@@ -143,10 +143,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!ready) return
-    void window.api.resize(
-      HEADER_H + MAIN_PADDING_Y + gridHeight(habits.length),
-      popupContentWidth()
-    )
+    void window.api.resize(HEADER_H + MAIN_PADDING_Y + gridHeight(habits.length))
   }, [habits.length, ready])
 
   const addHabit = useCallback(

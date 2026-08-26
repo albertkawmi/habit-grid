@@ -21,6 +21,11 @@ let ignoreBlurUntil = 0
 let lockedHeight = MIN_HEIGHT
 /** True while we are applying bounds ourselves — skip persist / height-fix recursion. */
 let applyingBounds = false
+/**
+ * Last known usable tray icon rect. On Windows, `tray.getBounds()` is often
+ * empty when the icon sits in the overflow area — prefer click-event bounds.
+ */
+let lastTrayBounds: Electron.Rectangle | null = null
 
 function surfaceColor(): string {
   return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#ffffff'
@@ -55,13 +60,48 @@ function persistWidthSoon(): void {
   }, 200)
 }
 
+function isUsableBounds(bounds: Electron.Rectangle | null | undefined): bounds is Electron.Rectangle {
+  return Boolean(bounds && bounds.width > 0 && bounds.height > 0)
+}
+
+function rememberTrayBounds(bounds: Electron.Rectangle | undefined): void {
+  if (isUsableBounds(bounds)) {
+    lastTrayBounds = { ...bounds }
+  }
+}
+
+/** Best-effort tray icon rect, or null when Windows reports an empty overflow icon. */
+function resolveTrayBounds(): Electron.Rectangle | null {
+  if (tray) {
+    const live = tray.getBounds()
+    if (isUsableBounds(live)) {
+      lastTrayBounds = { ...live }
+      return lastTrayBounds
+    }
+  }
+  if (isUsableBounds(lastTrayBounds)) {
+    return lastTrayBounds
+  }
+  return null
+}
+
+function anchorPoint(): Electron.Point {
+  const trayBounds = resolveTrayBounds()
+  if (trayBounds) {
+    return {
+      x: Math.round(trayBounds.x + trayBounds.width / 2),
+      y: Math.round(trayBounds.y + trayBounds.height / 2)
+    }
+  }
+  if (popup && !popup.isDestroyed()) {
+    const bounds = popup.getBounds()
+    return { x: bounds.x, y: bounds.y }
+  }
+  return screen.getCursorScreenPoint()
+}
+
 function workAreaMaxWidth(): number {
-  const point = tray
-    ? { x: tray.getBounds().x, y: tray.getBounds().y }
-    : popup && !popup.isDestroyed()
-      ? { x: popup.getBounds().x, y: popup.getBounds().y }
-      : screen.getCursorScreenPoint()
-  const { workArea } = screen.getDisplayNearestPoint(point)
+  const { workArea } = screen.getDisplayNearestPoint(anchorPoint())
   return workArea.width - SCREEN_MARGIN
 }
 
@@ -145,9 +185,10 @@ function cursorOverPopupOrTray(): boolean {
   if (!popup || popup.isDestroyed()) return false
   const point = screen.getCursorScreenPoint()
   if (pointInBounds(point, popup.getBounds(), 2)) return true
-  if (tray) {
+  const trayBounds = resolveTrayBounds()
+  if (trayBounds) {
     // Include the gap between tray and popup so moving between them doesn't dismiss.
-    if (pointInBounds(point, tray.getBounds(), TRAY_GAP)) return true
+    if (pointInBounds(point, trayBounds, TRAY_GAP)) return true
   }
   return false
 }
@@ -207,8 +248,14 @@ export function createPopup(preloadPath: string): BrowserWindow {
     }
   })
 
-  popup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  popup.setAlwaysOnTop(true, 'floating')
+  if (process.platform !== 'win32') {
+    popup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
+  if (process.platform === 'darwin') {
+    popup.setAlwaysOnTop(true, 'floating')
+  } else {
+    popup.setAlwaysOnTop(true)
+  }
 
   nativeTheme.on('updated', () => {
     popup?.setBackgroundColor(surfaceColor())
@@ -287,18 +334,40 @@ export function refreshPopupWidthLimits(): void {
 }
 
 function positionNearTray(): void {
-  if (!popup || !tray) return
+  if (!popup) return
 
-  const trayBounds = tray.getBounds()
   const { width, height } = popup.getBounds()
-  const { workArea } = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y })
+  const trayBounds = resolveTrayBounds()
+  const cursor = screen.getCursorScreenPoint()
+  const anchorX = trayBounds
+    ? trayBounds.x + trayBounds.width / 2
+    : cursor.x
+  const trayTop = trayBounds ? trayBounds.y : cursor.y
+  const trayBottom = trayBounds ? trayBounds.y + trayBounds.height : cursor.y
 
-  let x = Math.round(trayBounds.x + trayBounds.width / 2 - width / 2)
-  let y = Math.round(trayBounds.y + trayBounds.height + TRAY_GAP)
+  const display = screen.getDisplayNearestPoint({ x: Math.round(anchorX), y: Math.round(trayTop) })
+  const { workArea, bounds: displayBounds } = display
 
+  let x = Math.round(anchorX - width / 2)
   x = Math.max(workArea.x + 8, Math.min(x, workArea.x + workArea.width - width - 8))
-  if (y + height > workArea.y + workArea.height) {
-    y = Math.round(trayBounds.y - height - TRAY_GAP)
+
+  // Menu bar (macOS) sits in the top half; the Windows taskbar is usually at the bottom.
+  // Place the popup into the work area on the open side of the tray.
+  const trayInTopHalf = trayTop < displayBounds.y + displayBounds.height / 2
+  let y: number
+  if (trayInTopHalf) {
+    y = Math.round(trayBottom + TRAY_GAP)
+    // Tray coords can sit above the work area (in the menu bar) — pin under it.
+    if (y < workArea.y) y = workArea.y + 4
+    if (y + height > workArea.y + workArea.height) {
+      y = Math.max(workArea.y + 4, workArea.y + workArea.height - height - 8)
+    }
+  } else {
+    y = Math.round(trayTop - height - TRAY_GAP)
+    if (y + height > workArea.y + workArea.height) {
+      y = workArea.y + workArea.height - height - 8
+    }
+    if (y < workArea.y + 8) y = workArea.y + 8
   }
 
   withBounds(() => {
@@ -345,15 +414,39 @@ export function togglePopup(): void {
   }
 }
 
+/**
+ * Portable Windows builds extract to a temp dir each launch. Register the
+ * original .exe path so login startup keeps working after re-extraction.
+ */
+function loginItemPathOptions(): Electron.LoginItemSettingsOptions {
+  if (process.platform === 'win32') {
+    const portable = process.env.PORTABLE_EXECUTABLE_FILE
+    if (portable) {
+      return { path: portable, args: [] }
+    }
+  }
+  return {}
+}
+
 function buildTrayMenu(): Menu {
-  const { openAtLogin } = app.getLoginItemSettings()
+  const pathOptions = loginItemPathOptions()
+  const { openAtLogin } = app.getLoginItemSettings(pathOptions)
   return Menu.buildFromTemplate([
     {
       label: 'Open at Login',
       type: 'checkbox',
       checked: openAtLogin,
       click: (item) => {
-        app.setLoginItemSettings({ openAtLogin: item.checked })
+        const settings: Electron.Settings = {
+          openAtLogin: item.checked
+        }
+        if (pathOptions.path) {
+          settings.path = pathOptions.path
+          settings.args = pathOptions.args ?? []
+        }
+        app.setLoginItemSettings(settings)
+        // Reflect the OS result — portable path / policy can reject registration.
+        item.checked = app.getLoginItemSettings(pathOptions).openAtLogin
       }
     },
     { type: 'separator' },
@@ -377,36 +470,52 @@ function buildTrayMenu(): Menu {
 export function createTray(icon: Electron.NativeImage): Tray {
   tray = new Tray(icon)
   tray.setToolTip('Habit Grid')
+  rememberTrayBounds(tray.getBounds())
 
   // Use popUpContextMenu on right-click only — setContextMenu also opens on left-click.
   // Rebuild each time so the Open at Login checkbox matches System Settings.
-  tray.on('click', togglePopup)
-  tray.on('right-click', () => {
+  tray.on('click', (_event, bounds) => {
+    rememberTrayBounds(bounds)
+    togglePopup()
+  })
+  tray.on('right-click', (_event, bounds) => {
+    rememberTrayBounds(bounds)
     tray?.popUpContextMenu(buildTrayMenu())
   })
   return tray
 }
 
-export function resolveTrayIcon(): Electron.NativeImage {
-  const candidates = [
-    join(app.getAppPath(), 'resources/trayTemplate.png'),
-    join(__dirname, '../../resources/trayTemplate.png'),
-    join(process.cwd(), 'resources/trayTemplate.png')
+function resourceCandidates(fileName: string): string[] {
+  return [
+    join(app.getAppPath(), 'resources', fileName),
+    join(__dirname, '../../resources', fileName),
+    join(process.cwd(), 'resources', fileName)
   ]
+}
 
-  for (const path of candidates) {
-    if (existsSync(path)) {
+export function resolveTrayIcon(): Electron.NativeImage {
+  const names =
+    process.platform === 'win32'
+      ? ['tray-win.png', 'trayTemplate.png']
+      : ['trayTemplate.png']
+
+  for (const name of names) {
+    for (const path of resourceCandidates(name)) {
+      if (!existsSync(path)) continue
       const image = nativeImage.createFromPath(path)
-      if (process.platform === 'darwin') {
+      if (image.isEmpty()) continue
+      if (process.platform === 'darwin' && name.startsWith('trayTemplate')) {
         image.setTemplateImage(true)
       }
       return image
     }
   }
 
-  const fallback = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGEzgPxImhj8IDRgNg9EwGMIAAFhJULCor54EAAAAAElFTkSuQmCC'
-  )
+  const fallbackData =
+    process.platform === 'win32'
+      ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAnElEQVR42u2XQQ6AIAwEeYsP87e+S+OVgO5uuwGMm3DtzAFKW8ofMtuxn09nGNgmwoJTRaLwkEQWXJLIhlMSLjgsMVTAAbwDSzjgsIAL3hJoSrjgYYFeARSeIoBKoHBJ4E2CgcsCvaIsPCRQF1fg9CvoQVS41AuQhNuxcstZePg/sMLRjqjC02YCKxy9kEvNheuO5VMsJtOsZp/NBXEICYP7mVj+AAAAAElFTkSuQmCC'
+      : 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGEzgPxImhj8IDRgNg9EwGMIAAFhJULCor54EAAAAAElFTkSuQmCC'
+  const fallback = nativeImage.createFromDataURL(fallbackData)
   if (process.platform === 'darwin') {
     fallback.setTemplateImage(true)
   }

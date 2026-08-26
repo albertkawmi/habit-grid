@@ -35,14 +35,18 @@ quit_if_running() {
 quit_if_running
 
 echo "Building…"
-npm run build
-npx electron-builder --mac --dir
+npm run package:mac
 
 APP_SRC=""
-for candidate in \
-  "${ROOT}/dist/mac-arm64/${APP_NAME}" \
-  "${ROOT}/dist/mac/${APP_NAME}" \
-  "${ROOT}/dist/mac-x64/${APP_NAME}"; do
+# Prefer the host architecture when both arm64 and x64 were built.
+HOST_ARCH="$(uname -m)"
+if [[ "$HOST_ARCH" == "arm64" ]]; then
+  PREFERRED=("mac-arm64" "mac" "mac-x64")
+else
+  PREFERRED=("mac-x64" "mac" "mac-arm64")
+fi
+for dir in "${PREFERRED[@]}"; do
+  candidate="${ROOT}/dist/${dir}/${APP_NAME}"
   if [[ -d "$candidate" ]]; then
     APP_SRC="$candidate"
     break

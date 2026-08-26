@@ -1,7 +1,9 @@
 appId: com.albert.habit-grid
 productName: Habit Grid
+artifactName: ${name}-${version}-${os}-${arch}.${ext}
 directories:
   output: dist
+  buildResources: build
 files:
   - '!**/.vscode/*'
   - '!src/*'
@@ -16,8 +18,18 @@ extraResources:
 mac:
   category: public.app-category.productivity
   identity: null
+  icon: build/icon.png
   target:
     - target: dir
       arch:
         - arm64
+        - x64
+win:
+  icon: build/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+portable:
+  artifactName: ${name}-${version}-win-${arch}.${ext}
 npmRebuild: false

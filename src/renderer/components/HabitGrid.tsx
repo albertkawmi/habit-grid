@@ -439,8 +439,16 @@ export function HabitGrid({
       if (absX > absY) return
       if (absY === 0) return
 
+      // Normalize line/page deltas (common on Windows mice) to pixel scroll.
+      let delta = event.deltaY
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        delta *= COL
+      } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        delta *= el.clientWidth
+      }
+
       const maxScroll = el.scrollWidth - el.clientWidth
-      const next = Math.min(maxScroll, Math.max(0, el.scrollLeft + event.deltaY))
+      const next = Math.min(maxScroll, Math.max(0, el.scrollLeft + delta))
       if (next === el.scrollLeft) return
 
       event.preventDefault()

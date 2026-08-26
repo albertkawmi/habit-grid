@@ -1,9 +1,12 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 import { formatDateKey } from '../shared/dates'
+import { applySchema, runSql } from './schema'
+
+export { SCHEMA_VERSION, applySchema } from './schema'
 
 export interface Habit {
   id: number
@@ -20,8 +23,16 @@ let db: Database
 let dbPath: string
 
 function persist(): void {
-  const data = db.export()
-  writeFileSync(dbPath, Buffer.from(data))
+  const data = Buffer.from(db.export())
+  const tmpPath = `${dbPath}.tmp`
+  writeFileSync(tmpPath, data)
+  try {
+    renameSync(tmpPath, dbPath)
+  } catch {
+    // Windows cannot rename over an existing file — replace then rename.
+    copyFileSync(tmpPath, dbPath)
+    unlinkSync(tmpPath)
+  }
 }
 
 function queryAll<T>(sql: string, params: SqlValue[] = []): T[] {
@@ -42,8 +53,8 @@ function queryOne<T>(sql: string, params: SqlValue[] = []): T | undefined {
   return queryAll<T>(sql, params)[0]
 }
 
-function run(sql: string, params: SqlValue[] = []): void {
-  db.run(sql, params)
+function run(sql: string, params?: SqlValue[]): void {
+  runSql(db, sql, params)
 }
 
 function sqlWasmPath(file: string): string {
@@ -67,23 +78,7 @@ export async function initDb(): Promise<void> {
 
   // In-memory SQL.js; WAL does not apply. Persist via export() after writes.
   run('PRAGMA foreign_keys = ON')
-
-  run(`
-    CREATE TABLE IF NOT EXISTS habits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      position INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS completions (
-      habit_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      PRIMARY KEY (habit_id, date),
-      FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
-    );
-  `)
-
+  applySchema(db)
   persist()
 }
 

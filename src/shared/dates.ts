@@ -52,10 +52,12 @@ export function formatFullDate(key: string): string {
 }
 
 export function formatShortDate(key: string): string {
-  const date = parseDateKey(key)
-  const weekday = date.toLocaleDateString(undefined, { weekday: 'short' })
-  const month = date.toLocaleDateString(undefined, { month: 'short' })
-  return `${weekday} ${date.getDate()} ${month} ${date.getFullYear()}`
+  return parseDateKey(key).toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  })
 }
 
 /** Inclusive list of date keys from start to end. */

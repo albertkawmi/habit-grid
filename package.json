@@ -1,7 +1,7 @@
 {
   "name": "habit-grid",
   "productName": "Habit Grid",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Habit tracking grid in the system tray",
   "main": "./out/main/index.js",
   "author": "Albert",

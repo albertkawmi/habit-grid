@@ -14,7 +14,8 @@
     "package:win": "npm run build && electron-builder --win portable --x64",
     "release:win": "node scripts/release.mjs package:win",
     "release:mac": "node scripts/release.mjs install:mac",
-    "install:mac": "bash scripts/install-mac.sh"
+    "install:mac": "bash scripts/install-mac.sh",
+    "sync:db": "bash scripts/sync-db.sh"
   },
   "engines": {
     "node": ">=20.11.0"

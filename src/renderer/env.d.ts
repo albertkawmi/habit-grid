@@ -7,8 +7,10 @@ interface Habit {
   position: number
 }
 
+type CellStatus = 'done' | 'pass'
+
 interface CompletionsMap {
-  [habitId: number]: string[]
+  [habitId: number]: { [date: string]: CellStatus }
 }
 
 interface HabitStats {
@@ -40,7 +42,7 @@ interface HabitGridApi {
   deleteHabit: (id: number) => Promise<void>
   reorderHabits: (orderedIds: number[]) => Promise<void>
   getCompletions: (startDate: string, endDate: string) => Promise<CompletionsMap>
-  toggleCompletion: (habitId: number, date: string) => Promise<boolean>
+  toggleCompletion: (habitId: number, date: string) => Promise<CellStatus | null>
   getStats: () => Promise<StatsPayload>
   resize: (height: number) => Promise<void>
 }

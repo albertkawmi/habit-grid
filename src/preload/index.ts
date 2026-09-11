@@ -7,7 +7,9 @@ export interface Habit {
   position: number
 }
 
-export type CompletionsMap = Record<number, string[]>
+export type CellStatus = 'done' | 'pass'
+
+export type CompletionsMap = Record<number, Record<string, CellStatus>>
 
 export interface HabitStats {
   habitId: number
@@ -40,7 +42,7 @@ const api = {
     ipcRenderer.invoke('habits:reorder', orderedIds),
   getCompletions: (startDate: string, endDate: string): Promise<CompletionsMap> =>
     ipcRenderer.invoke('completions:getRange', startDate, endDate),
-  toggleCompletion: (habitId: number, date: string): Promise<boolean> =>
+  toggleCompletion: (habitId: number, date: string): Promise<CellStatus | null> =>
     ipcRenderer.invoke('completions:toggle', habitId, date),
   getStats: (): Promise<StatsPayload> => ipcRenderer.invoke('stats:get'),
   resize: (height: number): Promise<void> => ipcRenderer.invoke('app:resize', height)

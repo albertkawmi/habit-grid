@@ -55,9 +55,9 @@ if (!gotLock) {
       getCompletions(startDate, endDate)
     )
     ipcMain.handle('completions:toggle', (_event, habitId: number, date: string) => {
-      const done = toggleCompletion(habitId, date)
+      const status = toggleCompletion(habitId, date)
       refreshPopupWidthLimits()
-      return done
+      return status
     })
     ipcMain.handle('stats:get', () => getStats())
     ipcMain.handle('app:resize', (_event, height: number) => {

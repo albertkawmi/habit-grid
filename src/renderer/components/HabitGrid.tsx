@@ -80,12 +80,26 @@ interface SortableHabitNameProps {
 interface CalendarMatrixProps {
   dateMeta: DateMeta[]
   habits: Habit[]
-  completedByHabit: Map<number, Set<string>>
+  statusByHabit: Map<number, Record<string, CellStatus>>
   gridWidth: number
   activeId: number | null
   onToggle: (habitId: number, date: string) => void
   onCellHover: (habit: Habit, date: string, left: number, top: number) => void
   onCellLeave: () => void
+}
+
+function cellFillClass(future: boolean, status: CellStatus | undefined): string {
+  if (future) return 'cursor-default bg-cell/40'
+  if (status === 'done') return 'bg-done hover:bg-done-hover hover:scale-[1.18]'
+  if (status === 'pass') return 'bg-pass hover:bg-pass-hover hover:scale-[1.18]'
+  return 'bg-cell hover:bg-cell-hover hover:scale-[1.18]'
+}
+
+function statusLabel(future: boolean, status: CellStatus | undefined): string {
+  if (future) return 'Upcoming'
+  if (status === 'done') return 'Done'
+  if (status === 'pass') return 'Pass'
+  return 'Not done'
 }
 
 function SortableHabitName({
@@ -204,7 +218,7 @@ function SortableHabitName({
 const CalendarMatrix = memo(function CalendarMatrix({
   dateMeta,
   habits,
-  completedByHabit,
+  statusByHabit,
   gridWidth,
   activeId,
   onToggle,
@@ -229,7 +243,7 @@ const CalendarMatrix = memo(function CalendarMatrix({
       </div>
 
       {habits.map((habit) => {
-        const done = completedByHabit.get(habit.id)
+        const statuses = statusByHabit.get(habit.id)
         return (
           <div
             key={habit.id}
@@ -240,7 +254,7 @@ const CalendarMatrix = memo(function CalendarMatrix({
             style={{ height: CELL, gap: GAP }}
           >
             {dateMeta.map((meta) => {
-              const isDone = done?.has(meta.date) ?? false
+              const status = statuses?.[meta.date]
               return (
                 <button
                   key={meta.date}
@@ -249,7 +263,7 @@ const CalendarMatrix = memo(function CalendarMatrix({
                   disabled={meta.future}
                   data-habit-cell=""
                   aria-label={`${habit.name} — ${meta.fullLabel}`}
-                  aria-pressed={isDone}
+                  aria-pressed={status === 'done' ? true : status === 'pass' ? 'mixed' : false}
                   onClick={() => onToggle(habit.id, meta.date)}
                   onMouseEnter={(event) => {
                     // Prefer layout edge over assuming CELL size — hover:scale affects the rect.
@@ -276,11 +290,7 @@ const CalendarMatrix = memo(function CalendarMatrix({
                   }}
                   className={cn(
                     'shrink-0 rounded-[3px] transition-[background-color,transform] duration-75',
-                    meta.future
-                      ? 'cursor-default bg-cell/40'
-                      : isDone
-                        ? 'bg-done hover:bg-done-hover hover:scale-[1.18]'
-                        : 'bg-cell hover:bg-cell-hover hover:scale-[1.18]',
+                    cellFillClass(meta.future, status),
                     meta.isToday && 'today-ring'
                   )}
                   style={{
@@ -358,10 +368,10 @@ export function HabitGrid({
     [dates, today]
   )
 
-  const completedByHabit = useMemo(() => {
-    const map = new Map<number, Set<string>>()
-    for (const [id, list] of Object.entries(completions)) {
-      map.set(Number(id), new Set(list))
+  const statusByHabit = useMemo(() => {
+    const map = new Map<number, Record<string, CellStatus>>()
+    for (const [id, entries] of Object.entries(completions)) {
+      map.set(Number(id), entries)
     }
     return map
   }, [completions])
@@ -507,12 +517,12 @@ export function HabitGrid({
   const toggle = useCallback(
     async (habitId: number, date: string): Promise<void> => {
       if (date > today) return
-      const done = await window.api.toggleCompletion(habitId, date)
+      const next = await window.api.toggleCompletion(habitId, date)
       setCompletions((prev) => {
-        const updated = new Set(prev[habitId] ?? [])
-        if (done) updated.add(date)
-        else updated.delete(date)
-        return { ...prev, [habitId]: Array.from(updated) }
+        const updated = { ...(prev[habitId] ?? {}) }
+        if (next === null) delete updated[date]
+        else updated[date] = next
+        return { ...prev, [habitId]: updated }
       })
     },
     [today]
@@ -537,8 +547,7 @@ export function HabitGrid({
     onReorderHabits(arrayMove(habitIds, oldIndex, newIndex))
   }
 
-  const hoveredDone =
-    hover !== null && (completedByHabit.get(hover.habit.id)?.has(hover.date) ?? false)
+  const hoveredStatus = hover ? statusByHabit.get(hover.habit.id)?.[hover.date] : undefined
   const hoveredDateLabel = hover ? formatShortDate(hover.date) : ''
 
   // Prefer right-of-cell, vertically centered; flip left when the popup edge would clip.
@@ -569,7 +578,7 @@ export function HabitGrid({
     if (left < margin) left = margin
 
     setTipPos({ left, top })
-  }, [hover, hoveredDone, hoveredDateLabel])
+  }, [hover, hoveredStatus, hoveredDateLabel])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-visible" onMouseLeave={clearHover}>
@@ -611,7 +620,7 @@ export function HabitGrid({
           <CalendarMatrix
             dateMeta={dateMeta}
             habits={habits}
-            completedByHabit={completedByHabit}
+            statusByHabit={statusByHabit}
             gridWidth={gridWidth}
             activeId={activeId}
             onToggle={handleToggle}
@@ -654,12 +663,14 @@ export function HabitGrid({
                 'h-1.5 w-1.5 rounded-full',
                 hover.date > today
                   ? 'bg-white/30'
-                  : hoveredDone
+                  : hoveredStatus === 'done'
                     ? 'bg-done'
-                    : 'bg-white/40'
+                    : hoveredStatus === 'pass'
+                      ? 'bg-pass'
+                      : 'bg-white/40'
               )}
             />
-            {hover.date > today ? 'Upcoming' : hoveredDone ? 'Done' : 'Not done'}
+            {statusLabel(hover.date > today, hoveredStatus)}
           </div>
         </div>
       ) : null}

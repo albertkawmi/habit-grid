@@ -15,7 +15,9 @@ export interface Habit {
   position: number
 }
 
-export type CompletionsMap = Record<number, string[]>
+export type CellStatus = 'done' | 'pass'
+
+export type CompletionsMap = Record<number, Record<string, CellStatus>>
 
 const require = createRequire(__filename)
 
@@ -134,38 +136,39 @@ export function reorderHabits(orderedIds: number[]): void {
   }
 }
 
-export function getCompletions(startDate: string, endDate: string): CompletionsMap {
-  const rows = queryAll<{ habit_id: number; date: string }>(
-    `SELECT habit_id, date FROM completions
-     WHERE date >= ? AND date <= ?
-     ORDER BY date ASC`,
-    [startDate, endDate]
-  )
+function toStatus(value: string | undefined): CellStatus {
+  return value === 'pass' ? 'pass' : 'done'
+}
 
+function groupCompletions(
+  rows: { habit_id: number; date: string; status: string }[]
+): CompletionsMap {
   const map: CompletionsMap = {}
   for (const row of rows) {
     if (!map[row.habit_id]) {
-      map[row.habit_id] = []
+      map[row.habit_id] = {}
     }
-    map[row.habit_id].push(row.date)
+    map[row.habit_id][row.date] = toStatus(row.status)
   }
   return map
 }
 
-/** All completion dates per habit, ordered ascending — used for stats. */
-export function getAllCompletions(): CompletionsMap {
-  const rows = queryAll<{ habit_id: number; date: string }>(
-    `SELECT habit_id, date FROM completions ORDER BY date ASC`
+export function getCompletions(startDate: string, endDate: string): CompletionsMap {
+  const rows = queryAll<{ habit_id: number; date: string; status: string }>(
+    `SELECT habit_id, date, status FROM completions
+     WHERE date >= ? AND date <= ?
+     ORDER BY date ASC`,
+    [startDate, endDate]
   )
+  return groupCompletions(rows)
+}
 
-  const map: CompletionsMap = {}
-  for (const row of rows) {
-    if (!map[row.habit_id]) {
-      map[row.habit_id] = []
-    }
-    map[row.habit_id].push(row.date)
-  }
-  return map
+/** All logged dates per habit — used for stats. */
+export function getAllCompletions(): CompletionsMap {
+  const rows = queryAll<{ habit_id: number; date: string; status: string }>(
+    `SELECT habit_id, date, status FROM completions ORDER BY date ASC`
+  )
+  return groupCompletions(rows)
 }
 
 export function todayLocal(): string {
@@ -189,23 +192,38 @@ export function getEarliestEntryDate(): string | null {
   return keys[0]
 }
 
-export function toggleCompletion(habitId: number, date: string): boolean {
+/** Cycle empty → done → pass → empty. */
+export function toggleCompletion(habitId: number, date: string): CellStatus | null {
   if (date > todayLocal()) {
     throw new Error('Cannot complete habits on a future date')
   }
 
-  const existing = queryOne<{ ok: number }>(
-    'SELECT 1 AS ok FROM completions WHERE habit_id = ? AND date = ?',
+  const existing = queryOne<{ status: string }>(
+    'SELECT status FROM completions WHERE habit_id = ? AND date = ?',
     [habitId, date]
   )
 
-  if (existing) {
-    run('DELETE FROM completions WHERE habit_id = ? AND date = ?', [habitId, date])
+  if (!existing) {
+    run('INSERT INTO completions (habit_id, date, status) VALUES (?, ?, ?)', [
+      habitId,
+      date,
+      'done'
+    ])
     persist()
-    return false
+    return 'done'
   }
 
-  run('INSERT INTO completions (habit_id, date) VALUES (?, ?)', [habitId, date])
+  if (toStatus(existing.status) === 'done') {
+    run('UPDATE completions SET status = ? WHERE habit_id = ? AND date = ?', [
+      'pass',
+      habitId,
+      date
+    ])
+    persist()
+    return 'pass'
+  }
+
+  run('DELETE FROM completions WHERE habit_id = ? AND date = ?', [habitId, date])
   persist()
-  return true
+  return null
 }

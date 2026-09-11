@@ -1,7 +1,7 @@
 import type { Database, SqlValue } from 'sql.js'
 
 /** Bump when adding migrations that alter existing tables. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /**
  * sql.js only runs multi-statement SQL when the params argument is omitted.
@@ -41,6 +41,11 @@ export function listTables(db: Database): Set<string> {
   return new Set(rows.map((row) => row.name))
 }
 
+export function listColumns(db: Database, table: string): Set<string> {
+  const rows = queryAll<{ name: string }>(db, `PRAGMA table_info(${table})`)
+  return new Set(rows.map((row) => row.name))
+}
+
 /**
  * Create required tables and advance schema version.
  * Each CREATE runs as its own statement so sql.js cannot drop later DDL.
@@ -65,6 +70,7 @@ export function applySchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS completions (
       habit_id INTEGER NOT NULL,
       date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'done',
       PRIMARY KEY (habit_id, date),
       FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
     )
@@ -72,8 +78,13 @@ export function applySchema(db: Database): void {
   )
 
   const version = Number(queryOne<{ user_version: number }>(db, 'PRAGMA user_version')?.user_version ?? 0)
+  if (version < 2) {
+    const tables = listTables(db)
+    if (tables.has('completions') && !listColumns(db, 'completions').has('status')) {
+      runSql(db, `ALTER TABLE completions ADD COLUMN status TEXT NOT NULL DEFAULT 'done'`)
+    }
+  }
   if (version < SCHEMA_VERSION) {
-    // Future migrations for version < N go here before bumping.
     runSql(db, `PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
 

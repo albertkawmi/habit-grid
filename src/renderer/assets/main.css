@@ -12,6 +12,8 @@
   --color-cell-hover: var(--cell-hover);
   --color-done: var(--done);
   --color-done-hover: var(--done-hover);
+  --color-pass: var(--pass);
+  --color-pass-hover: var(--pass-hover);
   --color-accent: var(--accent);
   --color-chart-4: var(--chart-4);
   --color-danger: var(--danger);
@@ -34,6 +36,8 @@
   --cell-ring: rgba(27, 31, 35, 0.06);
   --done: #2da44e;
   --done-hover: #218739;
+  --pass: #9be9a8;
+  --pass-hover: #7bd896;
   --accent: #0969da;
   /* shadcn chart-4 — amber/gold */
   --chart-4: oklch(0.828 0.189 84.429);
@@ -55,6 +59,8 @@
     --cell-ring: rgba(255, 255, 255, 0.06);
     --done: #2ea043;
     --done-hover: #3fb950;
+    --pass: #3d8f54;
+    --pass-hover: #4aa562;
     --accent: #58a6ff;
     /* Keep chart-4 gold in dark for semantic highlights (shadcn default reassigns it). */
     --chart-4: oklch(0.828 0.189 84.429);

@@ -1,5 +1,5 @@
 import { addDays, daysBetween } from '../shared/dates'
-import { getAllCompletions, listHabits, todayLocal } from './db'
+import { type CompletionsMap, getAllCompletions, listHabits, todayLocal } from './db'
 
 export interface HabitStats {
   habitId: number
@@ -24,15 +24,23 @@ export interface StatsPayload {
   asOf: string
 }
 
-function bestStreak(dates: Set<string>, firstDate: string, today: string): number {
+/** Consecutive done days; pass days are skipped so they neither count nor break a streak. */
+function bestStreak(
+  done: Set<string>,
+  pass: Set<string>,
+  firstDate: string,
+  today: string
+): number {
   let best = 0
   let run = 0
   const total = daysBetween(firstDate, today)
   for (let i = 0; i <= total; i++) {
     const key = addDays(firstDate, i)
-    if (dates.has(key)) {
+    if (done.has(key)) {
       run += 1
       if (run > best) best = run
+    } else if (pass.has(key)) {
+      continue
     } else {
       run = 0
     }
@@ -40,12 +48,20 @@ function bestStreak(dates: Set<string>, firstDate: string, today: string): numbe
   return best
 }
 
-function currentStreak(dates: Set<string>, today: string): number {
-  if (!dates.has(today)) return 0
-  let streak = 0
+function currentStreak(done: Set<string>, pass: Set<string>, today: string): number {
   let key = today
-  while (dates.has(key)) {
-    streak += 1
+  while (pass.has(key)) {
+    key = addDays(key, -1)
+  }
+  if (!done.has(key)) return 0
+
+  let streak = 0
+  while (true) {
+    if (done.has(key)) {
+      streak += 1
+    } else if (!pass.has(key)) {
+      break
+    }
     key = addDays(key, -1)
   }
   return streak
@@ -65,6 +81,34 @@ function emptyHabitStats(habitId: number, name: string): HabitStats {
   }
 }
 
+function doneAndPass(entries: CompletionsMap[number]): {
+  done: Set<string>
+  pass: Set<string>
+  firstDone: string | null
+} {
+  const done = new Set<string>()
+  const pass = new Set<string>()
+  for (const [date, status] of Object.entries(entries)) {
+    if (status === 'pass') pass.add(date)
+    else done.add(date)
+  }
+
+  let firstDone: string | null = null
+  for (const date of done) {
+    if (firstDone === null || date < firstDone) firstDone = date
+  }
+  return { done, pass, firstDone }
+}
+
+function trackedDaysInWindow(firstDate: string, today: string, pass: Set<string>): number {
+  const span = daysBetween(firstDate, today) + 1
+  let passDays = 0
+  for (let i = 0; i < span; i++) {
+    if (pass.has(addDays(firstDate, i))) passDays += 1
+  }
+  return span - passDays
+}
+
 export function getStats(): StatsPayload {
   const today = todayLocal()
   const habits = listHabits()
@@ -75,17 +119,15 @@ export function getStats(): StatsPayload {
   let pooledTracked = 0
 
   const habitStats: HabitStats[] = habits.map((habit) => {
-    const dates = completions[habit.id] ?? []
-    totalCompletions += dates.length
+    const { done, pass, firstDone } = doneAndPass(completions[habit.id] ?? {})
+    totalCompletions += done.size
 
-    if (dates.length === 0) {
+    if (firstDone === null) {
       return emptyHabitStats(habit.id, habit.name)
     }
 
-    const dateSet = new Set(dates)
-    const firstDate = dates[0]
-    const trackedDays = daysBetween(firstDate, today) + 1
-    const completedDays = dates.length
+    const trackedDays = trackedDaysInWindow(firstDone, today, pass)
+    const completedDays = done.size
     const compliance = trackedDays > 0 ? completedDays / trackedDays : 0
 
     pooledCompleted += completedDays
@@ -94,12 +136,12 @@ export function getStats(): StatsPayload {
     return {
       habitId: habit.id,
       name: habit.name,
-      firstDate,
+      firstDate: firstDone,
       trackedDays,
       completedDays,
       compliance,
-      bestStreak: bestStreak(dateSet, firstDate, today),
-      currentStreak: currentStreak(dateSet, today),
+      bestStreak: bestStreak(done, pass, firstDone, today),
+      currentStreak: currentStreak(done, pass, today),
       weeklyAverage: trackedDays > 0 ? completedDays / (trackedDays / 7) : 0
     }
   })

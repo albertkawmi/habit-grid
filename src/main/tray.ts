@@ -13,6 +13,9 @@ const WIDTH_STATE_FILE = 'popup-width.json'
 
 let tray: Tray | null = null
 let popup: BrowserWindow | null = null
+let popupPreloadPath: string | null = null
+/** In-flight create+load, so overlapping tray clicks share one window. */
+let popupLoad: Promise<BrowserWindow | null> | null = null
 let hideOnBlurTimer: ReturnType<typeof setTimeout> | null = null
 let saveWidthTimer: ReturnType<typeof setTimeout> | null = null
 /** Ignore blur-hide until this time — accessory/tray focus is flaky right after show. */
@@ -212,7 +215,39 @@ export function getPopup(): BrowserWindow | null {
   return popup
 }
 
-export function createPopup(preloadPath: string): BrowserWindow {
+export function initPopup(preloadPath: string): void {
+  popupPreloadPath = preloadPath
+}
+
+function loadPopup(win: BrowserWindow): Promise<void> {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    return win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  }
+  return win.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+/** Returns the live popup, creating and loading it when it was closed or never built. */
+export function ensurePopup(): Promise<BrowserWindow | null> {
+  if (popup && !popup.isDestroyed()) return Promise.resolve(popup)
+  if (popupLoad) return popupLoad
+  if (!popupPreloadPath) return Promise.resolve(null)
+
+  popupLoad = (async () => {
+    const win = createPopup(popupPreloadPath!)
+    try {
+      await loadPopup(win)
+    } catch (error) {
+      if (!win.isDestroyed()) win.destroy()
+      throw error
+    }
+    return win.isDestroyed() ? null : win
+  })().finally(() => {
+    popupLoad = null
+  })
+  return popupLoad
+}
+
+function createPopup(preloadPath: string): BrowserWindow {
   const { min, max } = widthLimits()
   const saved = readSavedWidth()
   const width = clamp(saved ?? min, min, max)
@@ -375,16 +410,17 @@ function positionNearTray(): void {
   })
 }
 
-export function showPopup(): void {
-  if (!popup) return
+export async function showPopup(): Promise<void> {
+  const win = await ensurePopup()
+  if (!win || win.isDestroyed()) return
   clearHideOnBlurTimer()
   // Focus often fails to stick under activationPolicy: 'accessory'; suppress
   // blur-hide briefly so show-then-vanish races don't dismiss the popup.
   ignoreBlurUntil = Date.now() + 400
   refreshPopupWidthLimits()
   positionNearTray()
-  popup.show()
-  popup.focus()
+  win.show()
+  win.focus()
 }
 
 export function persistPopupWidth(): void {
@@ -405,13 +441,12 @@ export function hidePopup(): void {
   }
 }
 
-export function togglePopup(): void {
-  if (!popup) return
-  if (popup.isVisible()) {
+export async function togglePopup(): Promise<void> {
+  if (popup && !popup.isDestroyed() && popup.isVisible()) {
     hidePopup()
-  } else {
-    showPopup()
+    return
   }
+  await showPopup()
 }
 
 /**
@@ -476,7 +511,9 @@ export function createTray(icon: Electron.NativeImage): Tray {
   // Rebuild each time so the Open at Login checkbox matches System Settings.
   tray.on('click', (_event, bounds) => {
     rememberTrayBounds(bounds)
-    togglePopup()
+    void togglePopup().catch((error: unknown) => {
+      console.error('Failed to open Habit Grid', error)
+    })
   })
   tray.on('right-click', (_event, bounds) => {
     rememberTrayBounds(bounds)

@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'path'
 import {
   addHabit,
@@ -12,9 +12,10 @@ import {
 import { getStats } from './stats'
 import { destroyStatsWindow, initStatsWindow } from './stats-window'
 import {
-  createPopup,
   createTray,
+  ensurePopup,
   getPopup,
+  initPopup,
   persistPopupWidth,
   refreshPopupWidthLimits,
   resizePopup,
@@ -29,12 +30,39 @@ if (!gotLock) {
 } else {
   app.on('second-instance', () => {
     // Bring the existing tray popup forward when the user re-launches the app.
-    showPopup()
+    void showPopup()
   })
 
   if (process.platform === 'darwin') {
     // Must be set before ready — hides Dock / Cmd-Tab for tray apps.
     app.setActivationPolicy('accessory')
+  }
+
+  function installApplicationMenu(): void {
+    // Replace Electron's default menu. Its hidden Close Window item (⌘W / Ctrl+W)
+    // calls close() on the focused popup and destroys it.
+    // Keep Edit so text shortcuts still work; omit close, hide, and minimize.
+    const template: MenuItemConstructorOptions[] = [
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      }
+    ]
+    if (process.platform === 'darwin') {
+      template.unshift({
+        label: app.name,
+        submenu: [{ role: 'quit' }]
+      })
+    }
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   }
 
   function registerIpcHandlers(): void {
@@ -68,6 +96,7 @@ if (!gotLock) {
   app
     .whenReady()
     .then(async () => {
+      installApplicationMenu()
       app.setAppUserModelId('com.albert.habit-grid')
 
       if (process.platform === 'darwin') {
@@ -78,21 +107,16 @@ if (!gotLock) {
 
       const preloadPath = join(__dirname, '../preload/index.js')
       initStatsWindow(preloadPath)
-      const popup = createPopup(preloadPath)
+      initPopup(preloadPath)
       registerIpcHandlers()
-
-      if (process.env.ELECTRON_RENDERER_URL) {
-        await popup.loadURL(process.env.ELECTRON_RENDERER_URL)
-      } else {
-        await popup.loadFile(join(__dirname, '../renderer/index.html'))
-      }
+      await ensurePopup()
 
       createTray(resolveTrayIcon())
 
       // Make the first Windows launch discoverable instead of relying on a newly
       // installed tray icon that Windows may move into its overflow area.
       if (process.platform === 'win32') {
-        showPopup()
+        await showPopup()
       }
     })
     .catch((error: unknown) => {
